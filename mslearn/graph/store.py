@@ -59,3 +59,46 @@ class GraphStore:
 
     def node_count(self) -> int:
         return self.run_read("MATCH (n) RETURN count(n) AS c")[0]["c"]
+
+    # -- ingest -----------------------------------------------------------
+    def upsert_source(self, doc) -> None:
+        self.run_write(
+            "MERGE (s:Source {source_id: $source_id}) "
+            "SET s.source_type = $source_type, s.role = $role, s.title = $title",
+            source_id=doc.source_id, source_type=doc.source_type,
+            role=doc.role, title=doc.title,
+        )
+
+    def upsert_chunks(self, chunks, embeddings) -> None:
+        if len(chunks) != len(embeddings):
+            raise ValueError(
+                f"embeddings length {len(embeddings)} != chunks length {len(chunks)}"
+            )
+        rows = [
+            {
+                "chunk_id": c.chunk_id, "source_id": c.source_id, "seq": c.seq,
+                "unit_index": c.unit_index, "text": c.text, "embedding": emb,
+                "kind": c.locator.kind, "page": c.locator.page, "href": c.locator.href,
+                "url": c.locator.url, "para_index": c.locator.para_index,
+                "start_s": c.locator.start_s, "end_s": c.locator.end_s,
+            }
+            for c, emb in zip(chunks, embeddings)
+        ]
+        self.run_write(
+            "UNWIND $rows AS row "
+            "MATCH (s:Source {source_id: row.source_id}) "
+            "MERGE (c:Chunk {chunk_id: row.chunk_id}) "
+            "SET c += row "
+            "MERGE (s)-[:HAS_CHUNK]->(c)",
+            rows=rows,
+        )
+
+    def chunks_for_source(self, source_id: str) -> list[dict]:
+        return self.run_read(
+            "MATCH (:Source {source_id: $source_id})-[:HAS_CHUNK]->(c:Chunk) "
+            "RETURN c.chunk_id AS chunk_id, c.seq AS seq, c.unit_index AS unit_index, "
+            "c.text AS text, c.kind AS kind, c.page AS page, c.href AS href, "
+            "c.url AS url, c.para_index AS para_index, c.start_s AS start_s, "
+            "c.end_s AS end_s ORDER BY c.seq",
+            source_id=source_id,
+        )
