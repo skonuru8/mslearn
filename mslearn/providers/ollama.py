@@ -14,6 +14,13 @@ from mslearn.providers.base import (
 )
 
 
+def _json(resp: httpx.Response) -> dict:
+    try:
+        return resp.json()
+    except json.JSONDecodeError as exc:
+        raise ProviderBadOutputError(f"invalid JSON from ollama: {resp.text[:200]!r}") from exc
+
+
 class OllamaProvider(ModelProvider):
     name = "ollama"
 
@@ -45,8 +52,11 @@ class OllamaProvider(ModelProvider):
 
     def complete(self, model: str, request: ModelRequest) -> ModelResponse:
         start = time.perf_counter()
-        data = self._post("/api/chat", self._body(model, request, stream=False)).json()
-        text = data["message"]["content"]
+        data = _json(self._post("/api/chat", self._body(model, request, stream=False)))
+        try:
+            text = data["message"]["content"]
+        except (KeyError, TypeError) as exc:
+            raise ProviderBadOutputError(f"unexpected ollama response shape: {str(data)[:200]}") from exc
         parsed = None
         if request.json_schema is not None:
             try:
@@ -84,5 +94,8 @@ class OllamaProvider(ModelProvider):
             raise ProviderTransientError(str(exc)) from exc
 
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
-        data = self._post("/api/embed", {"model": model, "input": texts}).json()
-        return data["embeddings"]
+        data = _json(self._post("/api/embed", {"model": model, "input": texts}))
+        try:
+            return data["embeddings"]
+        except (KeyError, TypeError) as exc:
+            raise ProviderBadOutputError(f"unexpected ollama embed response shape: {str(data)[:200]}") from exc

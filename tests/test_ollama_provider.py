@@ -97,3 +97,17 @@ def test_stream_malformed_line_raises_bad_output():
     respx.post(f"{BASE}/api/chat").respond(content="{not json}\n")
     with pytest.raises(ProviderBadOutputError):
         list(OllamaProvider(BASE).stream("m", req()))
+
+
+@respx.mock
+def test_malformed_success_envelope_raises_bad_output():
+    respx.post(f"{BASE}/api/chat").respond(json={"unexpected": "shape"})
+    with pytest.raises(ProviderBadOutputError):
+        OllamaProvider(BASE).complete("m", req())
+
+
+@respx.mock
+def test_malformed_embed_envelope_raises_bad_output():
+    respx.post(f"{BASE}/api/embed").respond(json={"nope": []})
+    with pytest.raises(ProviderBadOutputError):
+        OllamaProvider(BASE).embed("m", ["x"])

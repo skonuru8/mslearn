@@ -16,6 +16,13 @@ from mslearn.providers.base import (
 _BASE = "https://openrouter.ai/api/v1"
 
 
+def _json(resp: httpx.Response) -> dict:
+    try:
+        return resp.json()
+    except json.JSONDecodeError as exc:
+        raise ProviderBadOutputError(f"invalid JSON from openrouter: {resp.text[:200]!r}") from exc
+
+
 class OpenRouterProvider(ModelProvider):
     name = "openrouter"
 
@@ -56,8 +63,11 @@ class OpenRouterProvider(ModelProvider):
 
     def complete(self, model: str, request: ModelRequest) -> ModelResponse:
         start = time.perf_counter()
-        data = self._post(self._body(model, request, stream=False)).json()
-        text = data["choices"][0]["message"]["content"]
+        data = _json(self._post(self._body(model, request, stream=False)))
+        try:
+            text = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderBadOutputError(f"unexpected openrouter response shape: {str(data)[:200]}") from exc
         parsed = None
         if request.json_schema is not None:
             try:

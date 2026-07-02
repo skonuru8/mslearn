@@ -88,3 +88,10 @@ def test_stream_malformed_chunk_raises_bad_output():
     respx.post(URL).respond(content=sse, headers={"content-type": "text/event-stream"})
     with pytest.raises(ProviderBadOutputError):
         list(OpenRouterProvider("k").stream("m", req()))
+
+
+@respx.mock
+def test_empty_choices_raises_bad_output():
+    respx.post(URL).respond(json={"choices": [], "usage": {}})
+    with pytest.raises(ProviderBadOutputError):
+        OpenRouterProvider("k").complete("m", req())

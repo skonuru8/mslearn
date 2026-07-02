@@ -45,6 +45,10 @@ class ModelRouter:
             self._db.log_model_call(role=role, provider=provider.name, model=role_cfg.model,
                                     outcome="error", error=str(exc)[:500])
             raise
+        except Exception as exc:
+            self._db.log_model_call(role=role, provider=provider.name, model=role_cfg.model,
+                                    outcome="error", error=str(exc)[:500])
+            raise
         self._db.log_model_call(
             role=role, provider=provider.name, model=role_cfg.model,
             input_tokens=resp.input_tokens, output_tokens=resp.output_tokens,
@@ -64,6 +68,9 @@ class ModelRouter:
         except GeneratorExit:
             outcome = "abandoned"
             raise
+        except Exception as exc:
+            outcome, error = "error", str(exc)[:500]
+            raise
         finally:
             self._db.log_model_call(
                 role=role, provider=provider.name, model=role_cfg.model,
@@ -77,6 +84,10 @@ class ModelRouter:
         try:
             vectors = provider.embed(role_cfg.model, texts)
         except ProviderError as exc:
+            self._db.log_model_call(role="embedding", provider=provider.name,
+                                    model=role_cfg.model, outcome="error", error=str(exc)[:500])
+            raise
+        except Exception as exc:
             self._db.log_model_call(role="embedding", provider=provider.name,
                                     model=role_cfg.model, outcome="error", error=str(exc)[:500])
             raise

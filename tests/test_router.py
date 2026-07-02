@@ -124,3 +124,31 @@ def test_abandoned_stream_logs_abandoned(env):
     gen.close()  # simulates consumer break
     calls = db.recent_calls()
     assert calls[0]["role"] == "interactive" and calls[0]["outcome"] == "abandoned"
+
+
+def test_non_taxonomy_exception_still_logged(env):
+    cfg, db, fakes, router = env
+
+    class Rogue(FakeProvider):
+        def complete(self, model, request):
+            raise RuntimeError("rogue failure")
+
+    router._providers["openrouter"] = Rogue("openrouter")
+    with pytest.raises(RuntimeError):
+        router.complete("interactive", request())
+    assert db.recent_calls()[0]["outcome"] == "error"
+
+
+def test_stream_non_taxonomy_exception_not_logged_as_ok(env):
+    cfg, db, fakes, router = env
+
+    class RogueStream(FakeProvider):
+        def stream(self, model, request):
+            yield "a"
+            raise RuntimeError("mid-stream rogue")
+
+    router._providers["openrouter"] = RogueStream("openrouter")
+    with pytest.raises(RuntimeError):
+        list(router.stream("interactive", request()))
+    calls = db.recent_calls()
+    assert calls[0]["outcome"] == "error" and "rogue" in calls[0]["error"]
