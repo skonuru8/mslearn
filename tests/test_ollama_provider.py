@@ -90,3 +90,10 @@ def test_404_is_provider_error_not_transient():
     with pytest.raises(ProviderError) as exc_info:
         OllamaProvider(BASE).complete("m", req())
     assert not isinstance(exc_info.value, ProviderTransientError)
+
+
+@respx.mock
+def test_stream_malformed_line_raises_bad_output():
+    respx.post(f"{BASE}/api/chat").respond(content="{not json}\n")
+    with pytest.raises(ProviderBadOutputError):
+        list(OllamaProvider(BASE).stream("m", req()))

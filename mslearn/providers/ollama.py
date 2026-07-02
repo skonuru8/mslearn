@@ -69,8 +69,11 @@ class OllamaProvider(ModelProvider):
                 for line in resp.iter_lines():
                     if not line:
                         continue
-                    chunk = json.loads(line)
-                    content = chunk.get("message", {}).get("content", "")
+                    try:
+                        chunk = json.loads(line)
+                        content = chunk.get("message", {}).get("content", "")
+                    except json.JSONDecodeError as exc:
+                        raise ProviderBadOutputError(f"malformed stream line: {line[:200]!r}") from exc
                     if content:
                         yield content
         except httpx.HTTPStatusError as exc:

@@ -87,8 +87,11 @@ class OpenRouterProvider(ModelProvider):
                     payload = line[len("data: "):]
                     if payload.strip() == "[DONE]":
                         break
-                    chunk = json.loads(payload)
-                    delta = chunk["choices"][0].get("delta", {}).get("content")
+                    try:
+                        chunk = json.loads(payload)
+                        delta = chunk["choices"][0].get("delta", {}).get("content")
+                    except (json.JSONDecodeError, KeyError, IndexError) as exc:
+                        raise ProviderBadOutputError(f"malformed SSE chunk: {payload[:200]!r}") from exc
                     if delta:
                         yield delta
         except httpx.HTTPStatusError as exc:
