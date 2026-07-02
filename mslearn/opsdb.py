@@ -21,7 +21,26 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tunables (
+    key TEXT PRIMARY KEY,
+    value REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tunable_audit (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    key TEXT NOT NULL,
+    value REAL NOT NULL,
+    reason TEXT NOT NULL
+);
 """
+
+TUNABLE_DEFAULTS: dict[str, float] = {
+    "trust.quote_threshold": 90.0,
+    "trust.embed_sim_threshold": 0.35,
+    "extract.max_attempts": 2.0,
+    "monitor.failure_rate_threshold": 0.5,
+    "monitor.min_chunks": 10.0,
+}
 
 
 class OpsDB:
@@ -72,3 +91,38 @@ class OpsDB:
                     " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     (key, value),
                 )
+
+    def get_tunable(self, key: str) -> float:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT value FROM tunables WHERE key = ?", (key,)
+            ).fetchone()
+        if row is not None:
+            return float(row["value"])
+        if key not in TUNABLE_DEFAULTS:
+            raise KeyError(f"unknown tunable {key!r}")
+        return TUNABLE_DEFAULTS[key]
+
+    def set_tunable(self, key: str, value: float, reason: str) -> None:
+        if key not in TUNABLE_DEFAULTS:
+            raise KeyError(f"unknown tunable {key!r}")
+        with self._lock:
+            with self.conn:
+                self.conn.execute(
+                    "INSERT INTO tunables (key, value) VALUES (?, ?)"
+                    " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, float(value)),
+                )
+                self.conn.execute(
+                    "INSERT INTO tunable_audit (ts, key, value, reason) VALUES (?, ?, ?, ?)",
+                    (time.time(), key, float(value), reason),
+                )
+
+    def tunable_history(self, key: str) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT ts, key, value, reason FROM tunable_audit"
+                " WHERE key = ? ORDER BY id DESC",
+                (key,),
+            ).fetchall()
+        return [dict(r) for r in rows]

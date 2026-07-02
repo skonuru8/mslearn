@@ -15,6 +15,9 @@ dependencies = [
     "yt-dlp>=2024.4.9",
     "faster-whisper>=1.0",
     "neo4j>=5.20",
+    "celery[redis]>=5.4",
+    "langgraph>=0.2",
+    "rapidfuzz>=3.9",
 ]
 
 [project.optional-dependencies]
