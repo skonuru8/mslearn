@@ -1,3 +1,4 @@
+import time
 from dataclasses import replace
 from typing import Iterator
 
@@ -53,15 +54,34 @@ class ModelRouter:
 
     def stream(self, role: str, request: ModelRequest) -> Iterator[str]:
         provider, role_cfg = self._resolve(role)
+        start = time.perf_counter()
+        outcome, error = "ok", None
         try:
             yield from provider.stream(role_cfg.model, self._merged(request, role_cfg))
         except ProviderError as exc:
-            self._db.log_model_call(role=role, provider=provider.name, model=role_cfg.model,
-                                    outcome="error", error=str(exc)[:500])
+            outcome, error = "error", str(exc)[:500]
             raise
-        self._db.log_model_call(role=role, provider=provider.name, model=role_cfg.model,
-                                outcome="ok")
+        except GeneratorExit:
+            outcome = "abandoned"
+            raise
+        finally:
+            self._db.log_model_call(
+                role=role, provider=provider.name, model=role_cfg.model,
+                latency_ms=(time.perf_counter() - start) * 1000,
+                outcome=outcome, error=error,
+            )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         provider, role_cfg = self._resolve("embedding")
-        return provider.embed(role_cfg.model, texts)
+        start = time.perf_counter()
+        try:
+            vectors = provider.embed(role_cfg.model, texts)
+        except ProviderError as exc:
+            self._db.log_model_call(role="embedding", provider=provider.name,
+                                    model=role_cfg.model, outcome="error", error=str(exc)[:500])
+            raise
+        self._db.log_model_call(
+            role="embedding", provider=provider.name, model=role_cfg.model,
+            latency_ms=(time.perf_counter() - start) * 1000, outcome="ok",
+        )
+        return vectors

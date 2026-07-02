@@ -85,3 +85,42 @@ def test_role_params_merged_into_request(env):
     router.complete("synthesis", request())
     _, sent = fakes["openrouter"].calls[-1]
     assert sent.params["temperature"] == 0.2
+
+    cfg.profiles["openrouter"].roles["synthesis"].params = {"temperature": 0.2, "top_p": 0.9}
+    router.complete("synthesis", ModelRequest(
+        messages=[ModelMessage(role="user", content="q")], params={"temperature": 0.7}))
+    _, sent = fakes["openrouter"].calls[-1]
+    assert sent.params["temperature"] == 0.7  # request wins on conflict
+    assert sent.params["top_p"] == 0.9        # role param preserved
+
+
+def test_embed_success_and_failure_are_logged(env):
+    cfg, db, fakes, router = env
+    router.embed(["x"])
+    calls = db.recent_calls()
+    assert calls[0]["role"] == "embedding" and calls[0]["outcome"] == "ok"
+
+    class ExplodingEmbed(FakeProvider):
+        def embed(self, model, texts):
+            raise ProviderError("embed boom")
+
+    router._providers["ollama"] = ExplodingEmbed("ollama")
+    with pytest.raises(ProviderError):
+        router.embed(["x"])
+    assert db.recent_calls()[0]["outcome"] == "error"
+
+
+def test_abandoned_stream_logs_abandoned(env):
+    cfg, db, fakes, router = env
+
+    class MultiChunk(FakeProvider):
+        def stream(self, model, request):
+            yield "a"
+            yield "b"
+
+    router._providers["openrouter"] = MultiChunk("openrouter")
+    gen = router.stream("interactive", request())
+    next(gen)
+    gen.close()  # simulates consumer break
+    calls = db.recent_calls()
+    assert calls[0]["role"] == "interactive" and calls[0]["outcome"] == "abandoned"
