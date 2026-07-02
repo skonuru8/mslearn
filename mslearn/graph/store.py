@@ -102,3 +102,44 @@ class GraphStore:
             "c.end_s AS end_s ORDER BY c.seq",
             source_id=source_id,
         )
+
+    # -- claims -----------------------------------------------------------
+    def upsert_claim(self, claim, embedding: list[float]) -> None:
+        self.run_write(
+            "MATCH (ch:Chunk {chunk_id: $chunk_id}) "
+            "MERGE (c:Claim {claim_id: $claim_id}) "
+            "SET c.text = $text, c.stance = $stance, c.quote = $quote, "
+            "c.trust = $trust, c.source_id = $source_id, c.embedding = $embedding "
+            "MERGE (c)-[:EXTRACTED_FROM]->(ch)",
+            chunk_id=claim.chunk_id, claim_id=claim.claim_id, text=claim.text,
+            stance=claim.stance, quote=claim.quote, trust=claim.trust,
+            source_id=claim.source_id, embedding=embedding,
+        )
+
+    def claims_for_source(self, source_id: str) -> list[dict]:
+        return self.run_read(
+            "MATCH (c:Claim {source_id: $source_id})-[:EXTRACTED_FROM]->(ch:Chunk) "
+            "RETURN c.claim_id AS claim_id, c.text AS text, c.stance AS stance, "
+            "c.quote AS quote, c.trust AS trust, ch.chunk_id AS chunk_id "
+            "ORDER BY c.claim_id",
+            source_id=source_id,
+        )
+
+    def set_claim_trust(self, claim_id: str, trust: str) -> None:
+        self.run_write(
+            "MATCH (c:Claim {claim_id: $claim_id}) SET c.trust = $trust",
+            claim_id=claim_id, trust=trust,
+        )
+
+    def _vector_search(self, index: str, embedding: list[float], k: int) -> list[dict]:
+        return self.run_read(
+            f"CALL db.index.vector.queryNodes('{index}', $k, $embedding) "
+            "YIELD node, score RETURN node{.*, score: score} AS hit",
+            k=k, embedding=embedding,
+        )
+
+    def vector_search_claims(self, embedding: list[float], k: int = 10) -> list[dict]:
+        return [r["hit"] for r in self._vector_search("claim_embedding", embedding, k)]
+
+    def vector_search_chunks(self, embedding: list[float], k: int = 10) -> list[dict]:
+        return [r["hit"] for r in self._vector_search("chunk_embedding", embedding, k)]
