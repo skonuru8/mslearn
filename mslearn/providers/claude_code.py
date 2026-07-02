@@ -53,7 +53,7 @@ class ClaudeCodeProvider(ModelProvider):
             raise ProviderBadOutputError(
                 f"claude produced non-JSON output: {proc.stdout[:200]!r}"
             ) from exc
-        text = data.get("result", "")
+        text = data.get("result") or ""
         parsed = parse_json_output(text) if request.json_schema is not None else None
         usage = data.get("usage") or {}
         return ModelResponse(

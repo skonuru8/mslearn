@@ -7,3 +7,5 @@ node_modules/
 dist/
 .pytest_cache/
 .ruff_cache/
+.agents/
+.DS_Store

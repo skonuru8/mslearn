@@ -35,12 +35,12 @@ class OpenRouterProvider(ModelProvider):
 
     def _body(self, model: str, request: ModelRequest, stream: bool) -> dict:
         body = {
+            **request.params,
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
             "max_tokens": request.max_tokens,
             "stream": stream,
             "usage": {"include": True},
-            **request.params,
         }
         if request.json_schema is not None:
             body["response_format"] = {
@@ -99,6 +99,8 @@ class OpenRouterProvider(ModelProvider):
                         break
                     try:
                         chunk = json.loads(payload)
+                        if not chunk.get("choices"):
+                            continue
                         delta = chunk["choices"][0].get("delta", {}).get("content")
                     except (json.JSONDecodeError, KeyError, IndexError) as exc:
                         raise ProviderBadOutputError(f"malformed SSE chunk: {payload[:200]!r}") from exc

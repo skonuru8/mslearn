@@ -71,3 +71,15 @@ def test_non_json_stdout_raises_bad_output(monkeypatch):
     monkeypatch.setattr(subprocess, "run", _run)
     with pytest.raises(ProviderBadOutputError):
         ClaudeCodeProvider().complete("default", req())
+
+
+def test_null_result_treated_as_empty(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", fake_run(None))
+    resp = ClaudeCodeProvider().complete("default", req())
+    assert resp.text == ""
+
+
+def test_null_result_with_schema_raises_bad_output(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", fake_run(None))
+    with pytest.raises(ProviderBadOutputError):
+        ClaudeCodeProvider().complete("default", req(schema={"type": "object"}))
