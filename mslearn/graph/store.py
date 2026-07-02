@@ -131,7 +131,7 @@ class GraphStore:
     # -- claims -----------------------------------------------------------
     def upsert_claim(self, claim, embedding: list[float]) -> None:
         """No-op if the Chunk node doesn't exist — caller must ensure it was upserted first."""
-        self.run_write(
+        self.run_write_checked(
             "MATCH (ch:Chunk {chunk_id: $chunk_id}) "
             "MERGE (c:Claim {claim_id: $claim_id}) "
             "SET c.text = $text, c.stance = $stance, c.quote = $quote, "

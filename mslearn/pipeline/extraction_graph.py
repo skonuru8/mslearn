@@ -29,6 +29,7 @@ class ExtractionState(TypedDict):
     rejected: list[dict]
     reasons: list[str]
     error: str | None
+    parse_error: bool
 
 
 def build_extraction_graph(router, db: OpsDB):
@@ -56,12 +57,17 @@ def build_extraction_graph(router, db: OpsDB):
             return {"error": str(exc)[:500], "drafts": []}
         except ExtractionParseError as exc:
             return {"drafts": [], "reasons": state["reasons"] + [f"parse: {exc}"],
-                    "attempt": state["attempt"] + 1}
-        return {"drafts": drafts, "attempt": state["attempt"] + 1}
+                    "attempt": state["attempt"] + 1, "parse_error": True}
+        return {"drafts": drafts, "attempt": state["attempt"] + 1, "parse_error": False}
 
     def validate(state: ExtractionState) -> dict:
         if state["error"] is not None:
             return {}
+        if state["parse_error"]:
+            return {
+                "rejected": [{"draft": None, "reasons": state["reasons"][-1:]}],
+                "reasons": state["reasons"],
+            }
         accepted = list(state["accepted"])
         seen = {d.text for d in accepted}
         failing: list[dict] = []
@@ -113,6 +119,6 @@ def run_extraction(router, db: OpsDB, chunk_id: str, chunk_text: str) -> Extract
     initial: ExtractionState = {
         "chunk_id": chunk_id, "chunk_text": chunk_text, "attempt": 0,
         "escalated": False, "drafts": [], "accepted": [], "rejected": [],
-        "reasons": [], "error": None,
+        "reasons": [], "error": None, "parse_error": False,
     }
     return graph.invoke(initial)

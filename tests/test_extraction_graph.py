@@ -7,6 +7,7 @@ GOOD = {"claims": [{"text": "Cache invalidation is hard.", "stance": "neutral",
                     "quote": "Cache invalidation is one of the two hard problems"}]}
 BAD = {"claims": [{"text": "Bananas are yellow.", "stance": "neutral",
                    "quote": "this text does not appear anywhere at all"}]}
+MALFORMED = {"nope": "not the claims key"}
 
 
 class ScriptedRouter:
@@ -71,3 +72,20 @@ def test_empty_claims_is_valid_end(tmp_path):
     router = ScriptedRouter([{"claims": []}])
     state = run_extraction(router, db(tmp_path), "c1", CHUNK)
     assert state["accepted"] == [] and state["rejected"] == [] and state["error"] is None
+
+
+def test_parse_error_retry_then_pass(tmp_path):
+    router = ScriptedRouter([MALFORMED, GOOD])
+    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    assert len(state["accepted"]) == 1
+    assert [d.text for d in state["accepted"]] == ["Cache invalidation is hard."]
+    assert router.calls == ["extraction", "extraction"]
+
+
+def test_parse_error_exhausted_escalates_with_rejects(tmp_path):
+    router = ScriptedRouter([MALFORMED, MALFORMED, MALFORMED, MALFORMED])
+    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    assert state["escalated"] is True
+    assert state["accepted"] == []
+    assert len(state["rejected"]) >= 1
+    assert state["error"] is None
