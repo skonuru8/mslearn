@@ -38,3 +38,25 @@ def tiny_epub(tmp_path_factory):
     book.spine = ["nav", ch1, ch2]
     epub.write_epub(str(path), book)
     return path
+
+
+@pytest.fixture(scope="session")
+def graph_store():
+    from mslearn.graph.store import GraphStore
+    from mslearn.settings import Settings
+
+    settings = Settings(_env_file=None)
+    try:
+        store = GraphStore(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+        store.ping()
+    except Exception:
+        pytest.skip("neo4j not reachable — start it with `make services`")
+    store.ensure_schema()
+    yield store
+    store.close()
+
+
+@pytest.fixture()
+def clean_graph(graph_store):
+    graph_store.wipe()
+    return graph_store

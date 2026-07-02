@@ -29,7 +29,10 @@ packages = ["mslearn"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["evals: release-gate eval suite (needs live backends)"]
+markers = [
+    "evals: release-gate eval suite (needs live backends)",
+    "neo4j: integration tests requiring a running Neo4j",
+]
 
 [tool.ruff]
 line-length = 100
