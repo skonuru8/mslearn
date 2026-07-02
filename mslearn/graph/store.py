@@ -72,6 +72,7 @@ class GraphStore:
         )
 
     def upsert_chunks(self, chunks, embeddings) -> None:
+        """No-op if the Source node doesn't exist — caller must ensure it was upserted first."""
         if len(chunks) != len(embeddings):
             raise ValueError(
                 f"embeddings length {len(embeddings)} != chunks length {len(chunks)}"
@@ -107,6 +108,7 @@ class GraphStore:
 
     # -- claims -----------------------------------------------------------
     def upsert_claim(self, claim, embedding: list[float]) -> None:
+        """No-op if the Chunk node doesn't exist — caller must ensure it was upserted first."""
         self.run_write(
             "MATCH (ch:Chunk {chunk_id: $chunk_id}) "
             "MERGE (c:Claim {claim_id: $claim_id}) "
@@ -128,6 +130,7 @@ class GraphStore:
         )
 
     def set_claim_trust(self, claim_id: str, trust: str) -> None:
+        """No-op if the Claim node doesn't exist — caller must ensure it was upserted first."""
         self.run_write(
             "MATCH (c:Claim {claim_id: $claim_id}) SET c.trust = $trust",
             claim_id=claim_id, trust=trust,
@@ -155,6 +158,7 @@ class GraphStore:
         )
 
     def assign_claim(self, claim_id: str, concept_id: str) -> None:
+        """No-op if Claim or Concept doesn't exist — caller must ensure they were upserted first."""
         self.run_write(
             "MATCH (c:Claim {claim_id: $claim_id}), (k:Concept {concept_id: $concept_id}) "
             "MERGE (c)-[:IN_CONCEPT]->(k)",
@@ -162,6 +166,7 @@ class GraphStore:
         )
 
     def add_depends_on(self, from_concept_id: str, to_concept_id: str) -> None:
+        """No-op if either Concept doesn't exist — caller must ensure they were upserted first."""
         self.run_write(
             "MATCH (a:Concept {concept_id: $a}), (b:Concept {concept_id: $b}) "
             "MERGE (a)-[:DEPENDS_ON]->(b)",
@@ -170,6 +175,9 @@ class GraphStore:
 
     def add_conflict(self, claim_a: str, claim_b: str,
                      classification: str, rationale: str) -> None:
+        """Creates a directed CONFLICTS_WITH edge from claim_a to claim_b.
+        No-op if either Claim doesn't exist — caller must ensure they were upserted first.
+        Use consistent ordering (e.g. lexicographically smaller claim_id as claim_a) to avoid duplicate edges."""
         validate_classification(classification)
         self.run_write(
             "MATCH (a:Claim {claim_id: $a}), (b:Claim {claim_id: $b}) "
@@ -203,6 +211,7 @@ class GraphStore:
         )
 
     def mark_concept_dirty(self, concept_id: str, dirty: bool = True) -> None:
+        """No-op if the Concept node doesn't exist — caller must ensure it was upserted first."""
         self.run_write(
             "MATCH (k:Concept {concept_id: $concept_id}) SET k.dirty = $dirty",
             concept_id=concept_id, dirty=dirty,
