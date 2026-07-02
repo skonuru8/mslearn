@@ -1,0 +1,27 @@
+# Model IDs live HERE, never in code. Bump versions by editing this file.
+default_profile: openrouter
+
+profiles:
+  openrouter:
+    roles:
+      extraction:  {provider: ollama,     model: "qwen3.5:9b"}
+      synthesis:   {provider: openrouter, model: "deepseek/deepseek-r1"}
+      interactive: {provider: openrouter, model: "deepseek/deepseek-chat"}
+      evals:       {provider: openrouter, model: "deepseek/deepseek-r1"}
+      embedding:   {provider: ollama,     model: "nomic-embed-text"}
+
+  claude-code:
+    roles:
+      extraction:  {provider: ollama,      model: "qwen3.5:9b"}
+      synthesis:   {provider: claude_code, model: "default"}
+      interactive: {provider: claude_code, model: "default"}
+      evals:       {provider: claude_code, model: "default"}
+      embedding:   {provider: ollama,      model: "nomic-embed-text"}
+
+  offline:
+    roles:
+      extraction:  {provider: ollama, model: "qwen3.5:9b"}
+      synthesis:   {provider: ollama, model: "qwen3.5:9b"}
+      interactive: {provider: ollama, model: "qwen3.5:9b"}
+      evals:       {provider: ollama, model: "qwen3.5:9b"}
+      embedding:   {provider: ollama, model: "nomic-embed-text"}
