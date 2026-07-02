@@ -32,3 +32,20 @@ def test_wal_mode_is_active(tmp_path):
     db = OpsDB(tmp_path / "ops.db")
     mode = db.conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "wal"
+
+
+def test_concurrent_writes_from_threads(tmp_path):
+    import threading
+
+    db = OpsDB(tmp_path / "ops.db")
+
+    def write_batch():
+        for _ in range(20):
+            db.log_model_call(role="r", provider="p", model="m", outcome="ok")
+
+    threads = [threading.Thread(target=write_batch) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(db.recent_calls(limit=500)) == 200

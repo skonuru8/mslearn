@@ -95,3 +95,25 @@ def test_empty_choices_raises_bad_output():
     respx.post(URL).respond(json={"choices": [], "usage": {}})
     with pytest.raises(ProviderBadOutputError):
         OpenRouterProvider("k").complete("m", req())
+
+
+@respx.mock
+def test_stream_tolerates_trailing_usage_chunk():
+    sse = (
+        'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"cost":0.0001}}\n\n'
+        "data: [DONE]\n\n"
+    )
+    respx.post(URL).respond(content=sse, headers={"content-type": "text/event-stream"})
+    assert list(OpenRouterProvider("k").stream("m", req())) == ["hi"]
+
+
+@respx.mock
+def test_params_cannot_override_reserved_keys():
+    route = respx.post(URL).respond(json=ok_body("x"))
+    r = ModelRequest(messages=[ModelMessage(role="user", content="q")],
+                     params={"model": "evil", "stream": True, "temperature": 0.3})
+    OpenRouterProvider("k").complete("real-model", r)
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["model"] == "real-model" and sent["stream"] is False
+    assert sent["temperature"] == 0.3  # non-reserved params still pass through
