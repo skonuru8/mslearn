@@ -58,7 +58,7 @@ def load_youtube(
         raw = None
 
     units: list[StructuralUnit] = []
-    if raw:
+    if raw is not None:
         for entry in raw:
             text = entry["text"].strip()
             if not text:

@@ -68,3 +68,12 @@ def test_heavy_imports_lazy():
 
     assert "youtube_transcript_api" not in sys.modules
     assert "yt_dlp" not in sys.modules
+
+
+def test_empty_caption_list_gives_empty_doc_not_fallback():
+    doc = load_youtube(URL, fetch_transcript=lambda vid: [])
+    assert doc.units == []
+
+
+def test_shorts_url_parses():
+    assert video_id_of("https://www.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
