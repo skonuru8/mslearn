@@ -1,5 +1,7 @@
 from neo4j import GraphDatabase
 
+from mslearn.graph.records import validate_classification
+
 _CONSTRAINTS = [
     "CREATE CONSTRAINT source_id IF NOT EXISTS FOR (n:Source) REQUIRE n.source_id IS UNIQUE",
     "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (n:Chunk) REQUIRE n.chunk_id IS UNIQUE",
@@ -143,3 +145,71 @@ class GraphStore:
 
     def vector_search_chunks(self, embedding: list[float], k: int = 10) -> list[dict]:
         return [r["hit"] for r in self._vector_search("chunk_embedding", embedding, k)]
+
+    # -- concepts -----------------------------------------------------------
+    def upsert_concept(self, concept) -> None:
+        self.run_write(
+            "MERGE (k:Concept {concept_id: $concept_id}) "
+            "SET k.name = $name, k.summary = $summary",
+            concept_id=concept.concept_id, name=concept.name, summary=concept.summary,
+        )
+
+    def assign_claim(self, claim_id: str, concept_id: str) -> None:
+        self.run_write(
+            "MATCH (c:Claim {claim_id: $claim_id}), (k:Concept {concept_id: $concept_id}) "
+            "MERGE (c)-[:IN_CONCEPT]->(k)",
+            claim_id=claim_id, concept_id=concept_id,
+        )
+
+    def add_depends_on(self, from_concept_id: str, to_concept_id: str) -> None:
+        self.run_write(
+            "MATCH (a:Concept {concept_id: $a}), (b:Concept {concept_id: $b}) "
+            "MERGE (a)-[:DEPENDS_ON]->(b)",
+            a=from_concept_id, b=to_concept_id,
+        )
+
+    def add_conflict(self, claim_a: str, claim_b: str,
+                     classification: str, rationale: str) -> None:
+        validate_classification(classification)
+        self.run_write(
+            "MATCH (a:Claim {claim_id: $a}), (b:Claim {claim_id: $b}) "
+            "MERGE (a)-[r:CONFLICTS_WITH]->(b) "
+            "SET r.classification = $classification, r.rationale = $rationale",
+            a=claim_a, b=claim_b, classification=classification, rationale=rationale,
+        )
+
+    def claims_in_concept(self, concept_id: str) -> list[dict]:
+        return self.run_read(
+            "MATCH (c:Claim)-[:IN_CONCEPT]->(:Concept {concept_id: $concept_id}) "
+            "RETURN c.claim_id AS claim_id, c.text AS text, c.stance AS stance, "
+            "c.trust AS trust, c.source_id AS source_id ORDER BY c.claim_id",
+            concept_id=concept_id,
+        )
+
+    def conflicts_in_concept(self, concept_id: str) -> list[dict]:
+        return self.run_read(
+            "MATCH (a:Claim)-[r:CONFLICTS_WITH]->(b:Claim), "
+            "(a)-[:IN_CONCEPT]->(k:Concept {concept_id: $concept_id}), "
+            "(b)-[:IN_CONCEPT]->(k) "
+            "RETURN a.claim_id AS claim_a, b.claim_id AS claim_b, "
+            "r.classification AS classification, r.rationale AS rationale",
+            concept_id=concept_id,
+        )
+
+    def concept_dependencies(self) -> list[dict]:
+        return self.run_read(
+            "MATCH (a:Concept)-[:DEPENDS_ON]->(b:Concept) "
+            "RETURN a.concept_id AS from_id, b.concept_id AS to_id",
+        )
+
+    def mark_concept_dirty(self, concept_id: str, dirty: bool = True) -> None:
+        self.run_write(
+            "MATCH (k:Concept {concept_id: $concept_id}) SET k.dirty = $dirty",
+            concept_id=concept_id, dirty=dirty,
+        )
+
+    def dirty_concepts(self) -> list[str]:
+        return [r["concept_id"] for r in self.run_read(
+            "MATCH (k:Concept {dirty: true}) RETURN k.concept_id AS concept_id "
+            "ORDER BY k.concept_id",
+        )]
