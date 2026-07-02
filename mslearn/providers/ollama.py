@@ -62,14 +62,23 @@ class OllamaProvider(ModelProvider):
         )
 
     def stream(self, model: str, request: ModelRequest) -> Iterator[str]:
-        resp = self._post("/api/chat", self._body(model, request, stream=True))
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            chunk = json.loads(line)
-            content = chunk.get("message", {}).get("content", "")
-            if content:
-                yield content
+        body = self._body(model, request, stream=True)
+        try:
+            with self._client.stream("POST", "/api/chat", json=body) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    content = chunk.get("message", {}).get("content", "")
+                    if content:
+                        yield content
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500 or exc.response.status_code == 429:
+                raise ProviderTransientError(str(exc)) from exc
+            raise ProviderError(str(exc)) from exc
+        except httpx.TransportError as exc:
+            raise ProviderTransientError(str(exc)) from exc
 
     def embed(self, model: str, texts: list[str]) -> list[list[float]]:
         data = self._post("/api/embed", {"model": model, "input": texts}).json()

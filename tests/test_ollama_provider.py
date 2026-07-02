@@ -8,6 +8,7 @@ from mslearn.providers.base import (
     ModelMessage,
     ModelRequest,
     ProviderBadOutputError,
+    ProviderError,
     ProviderTransientError,
 )
 from mslearn.providers.ollama import OllamaProvider
@@ -74,3 +75,18 @@ def test_embed():
     respx.post(f"{BASE}/api/embed").respond(json={"embeddings": [[0.1, 0.2], [0.3, 0.4]]})
     vecs = OllamaProvider(BASE).embed("emb-model", ["a", "b"])
     assert vecs == [[0.1, 0.2], [0.3, 0.4]]
+
+
+@respx.mock
+def test_429_is_transient():
+    respx.post(f"{BASE}/api/chat").respond(status_code=429)
+    with pytest.raises(ProviderTransientError):
+        OllamaProvider(BASE).complete("m", req())
+
+
+@respx.mock
+def test_404_is_provider_error_not_transient():
+    respx.post(f"{BASE}/api/chat").respond(status_code=404)
+    with pytest.raises(ProviderError) as exc_info:
+        OllamaProvider(BASE).complete("m", req())
+    assert not isinstance(exc_info.value, ProviderTransientError)
