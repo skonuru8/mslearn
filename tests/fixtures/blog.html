@@ -1,0 +1,11 @@
+<html><head><title>Why Global State Hurts</title></head>
+<body>
+<nav><a href="/">Home</a><a href="/about">About</a></nav>
+<article>
+<h1>Why Global State Hurts</h1>
+<p>Global mutable state couples distant parts of a codebase and makes tests order-dependent, which is why experienced teams isolate it aggressively behind narrow interfaces.</p>
+<p>Dependency injection is the standard remedy: pass collaborators in explicitly so each unit can be exercised in isolation with fakes, and the object graph is visible at construction time.</p>
+<p>There are exceptions, of course. Process-wide caches and connection pools are global by nature, and pretending otherwise just moves the problem around without solving anything.</p>
+</article>
+<footer>Copyright 2026</footer>
+</body></html>

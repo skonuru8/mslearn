@@ -1,0 +1,43 @@
+import re
+from pathlib import Path
+
+import httpx
+import trafilatura
+
+from mslearn.adapters.base import Locator, SourceDocument, StructuralUnit, make_source_id
+
+
+class BlogExtractionError(Exception):
+    """trafilatura found no extractable article content."""
+
+
+def _title_of(html: str, fallback: str) -> str:
+    match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else fallback
+
+
+def load_blog_html(html: str, url: str, role: str = "supplement") -> SourceDocument:
+    text = trafilatura.extract(html)
+    if not text:
+        raise BlogExtractionError(f"no extractable content at {url!r}")
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    units = [
+        StructuralUnit(
+            index=i, title="", text=p,
+            locator=Locator(kind="url", url=url, para_index=i),
+        )
+        for i, p in enumerate(paragraphs)
+    ]
+    return SourceDocument(
+        source_id=make_source_id(url), source_type="blog",
+        role=role, title=_title_of(html, url), units=units,
+    )
+
+
+def load_blog(ref: str, role: str = "supplement") -> SourceDocument:
+    if ref.startswith(("http://", "https://")):
+        resp = httpx.get(ref, follow_redirects=True, timeout=60.0)
+        resp.raise_for_status()
+        return load_blog_html(resp.text, url=ref, role=role)
+    path = Path(ref)
+    return load_blog_html(path.read_text(), url=str(path), role=role)
