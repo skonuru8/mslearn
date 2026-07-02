@@ -1,4 +1,4 @@
-.PHONY: services services-down test check
+.PHONY: services services-down test check graph-test
 
 services:
 	docker compose up -d
@@ -12,3 +12,6 @@ test:
 check:
 	.venv/bin/ruff check .
 	.venv/bin/pytest
+
+graph-test:
+	docker compose up -d neo4j && sleep 20 && .venv/bin/pytest -m neo4j -v

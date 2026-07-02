@@ -213,3 +213,27 @@ class GraphStore:
             "MATCH (k:Concept {dirty: true}) RETURN k.concept_id AS concept_id "
             "ORDER BY k.concept_id",
         )]
+
+    # -- export -----------------------------------------------------------
+    def export_all(self) -> tuple[list[dict], list[dict]]:
+        nodes = [
+            {
+                "id": f"n{r['nid']}",
+                "labels": r["labels"],
+                "properties": {k: v for k, v in r["props"].items() if k != "embedding"},
+            }
+            for r in self.run_read(
+                "MATCH (n) RETURN id(n) AS nid, labels(n) AS labels, properties(n) AS props"
+            )
+        ]
+        rels = [
+            {
+                "start": f"n{r['start']}", "end": f"n{r['end']}",
+                "type": r["type"], "properties": r["props"],
+            }
+            for r in self.run_read(
+                "MATCH (a)-[r]->(b) RETURN id(a) AS start, id(b) AS end, "
+                "type(r) AS type, properties(r) AS props"
+            )
+        ]
+        return nodes, rels

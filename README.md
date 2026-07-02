@@ -32,3 +32,11 @@ PDF/EPUB books (page/href citations), blog URLs or saved HTML (trafilatura),
 YouTube videos (captions, whisper fallback), and audio files (faster-whisper).
 `chunk_source(doc)` packs it into ≤500-token chunks with locators preserved.
 Audio/caption-less-video ingestion downloads a Whisper model on first use.
+
+## Concept graph
+
+Neo4j holds the knowledge graph (browser: http://localhost:7474). `GraphStore`
+owns all Cypher: schema/vector indexes, source/chunk/claim upserts, concepts
+with `DEPENDS_ON` and classified `CONFLICTS_WITH` edges, vector search, and
+portable GraphML/JSON export (embeddings excluded). Integration tests need
+`make services`; they skip cleanly when Neo4j is down (`make graph-test`).
