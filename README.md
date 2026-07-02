@@ -24,3 +24,11 @@ Spec: `docs/superpowers/specs/2026-07-02-multi-source-learning-system-design.md`
 ## Backend profiles
 Model routing lives in `profiles.yaml` (profiles: `openrouter` default,
 `claude-code`, `offline`). Model IDs are config-only — edit the YAML to bump.
+
+## Sources
+
+`load_source(ref)` ingests any supported source into a normalized `SourceDocument`:
+PDF/EPUB books (page/href citations), blog URLs or saved HTML (trafilatura),
+YouTube videos (captions, whisper fallback), and audio files (faster-whisper).
+`chunk_source(doc)` packs it into ≤500-token chunks with locators preserved.
+Audio/caption-less-video ingestion downloads a Whisper model on first use.
