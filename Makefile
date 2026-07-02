@@ -1,4 +1,4 @@
-.PHONY: services services-down test check graph-test
+.PHONY: services services-down test check graph-test worker
 
 services:
 	docker compose up -d
@@ -15,3 +15,6 @@ check:
 
 graph-test:
 	docker compose up -d neo4j && sleep 20 && .venv/bin/pytest -m neo4j -v
+
+worker:
+	.venv/bin/celery -A mslearn.worker.app worker -Q ingest,judge --concurrency=2 -l info
