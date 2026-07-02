@@ -32,6 +32,24 @@ CREATE TABLE IF NOT EXISTS tunable_audit (
     value REAL NOT NULL,
     reason TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ingest_sources (
+    source_id TEXT PRIMARY KEY,
+    ref TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'registered',
+    total_chunks INTEGER NOT NULL,
+    done_chunks INTEGER NOT NULL DEFAULT 0,
+    failed_chunks INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chunk_jobs (
+    chunk_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT
+);
 """
 
 TUNABLE_DEFAULTS: dict[str, float] = {
@@ -126,3 +144,74 @@ class OpsDB:
                 (key,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def register_source(self, source_id, ref, role, total_chunks) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO ingest_sources"
+                " (source_id, ref, role, total_chunks, ts) VALUES (?, ?, ?, ?, ?)",
+                (source_id, ref, role, total_chunks, time.time()),
+            )
+
+    def set_source_status(self, source_id, status, error=None) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE ingest_sources SET status = ?, error = COALESCE(?, error)"
+                " WHERE source_id = ?",
+                (status, error, source_id),
+            )
+
+    def source_row(self, source_id) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM ingest_sources WHERE source_id = ?", (source_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def all_sources(self) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute("SELECT * FROM ingest_sources ORDER BY ts").fetchall()
+        return [dict(r) for r in rows]
+
+    def register_chunk_jobs(self, source_id, chunk_ids) -> None:
+        with self._lock, self.conn:
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO chunk_jobs (chunk_id, source_id) VALUES (?, ?)",
+                [(cid, source_id) for cid in chunk_ids],
+            )
+
+    def mark_chunk(self, chunk_id, status, error=None) -> None:
+        with self._lock, self.conn:
+            row = self.conn.execute(
+                "SELECT source_id, status FROM chunk_jobs WHERE chunk_id = ?", (chunk_id,)
+            ).fetchone()
+            self.conn.execute(
+                "UPDATE chunk_jobs SET status = ?, error = ?,"
+                " attempts = attempts + 1 WHERE chunk_id = ?",
+                (status, error, chunk_id),
+            )
+            if row and status in ("done", "failed") and row["status"] not in ("done", "failed"):
+                column = "done_chunks" if status == "done" else "failed_chunks"
+                self.conn.execute(
+                    f"UPDATE ingest_sources SET {column} = {column} + 1 WHERE source_id = ?",
+                    (row["source_id"],),
+                )
+
+    def pending_chunks(self, source_id) -> list[str]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT chunk_id FROM chunk_jobs WHERE source_id = ? AND status = 'pending'"
+                " ORDER BY chunk_id",
+                (source_id,),
+            ).fetchall()
+        return [r["chunk_id"] for r in rows]
+
+    def failure_stats(self, source_id) -> dict:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT count(*) AS total,"
+                " sum(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed"
+                " FROM chunk_jobs WHERE source_id = ?",
+                (source_id,),
+            ).fetchone()
+        return {"total": row["total"], "failed": row["failed"] or 0}

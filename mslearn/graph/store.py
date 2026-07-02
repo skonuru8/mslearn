@@ -16,6 +16,10 @@ _VECTOR_INDEX = (
 )
 
 
+class GraphWriteError(Exception):
+    """A graph write matched nothing and silently changed nothing."""
+
+
 class GraphStore:
     def __init__(self, uri: str, user: str, password: str, embedding_dim: int = 768):
         self._driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -35,9 +39,17 @@ class GraphStore:
         self._driver.verify_connectivity()
 
     # -- low-level helpers (used by later tasks and tests) --------------
-    def run_write(self, query: str, **params) -> None:
+    def run_write(self, query: str, **params):
         with self._driver.session() as session:
-            session.execute_write(lambda tx: tx.run(query, **params).consume())
+            return session.execute_write(
+                lambda tx: tx.run(query, **params).consume().counters
+            )
+
+    def run_write_checked(self, query: str, **params):
+        counters = self.run_write(query, **params)
+        if not counters.contains_updates:
+            raise GraphWriteError(f"write changed nothing: {query[:120]}")
+        return counters
 
     def run_read(self, query: str, **params) -> list[dict]:
         with self._driver.session() as session:
@@ -105,6 +117,16 @@ class GraphStore:
             "c.end_s AS end_s ORDER BY c.seq",
             source_id=source_id,
         )
+
+    def get_chunk(self, chunk_id: str) -> dict | None:
+        rows = self.run_read(
+            "MATCH (c:Chunk {chunk_id: $chunk_id}) "
+            "RETURN c.chunk_id AS chunk_id, c.source_id AS source_id, c.text AS text, "
+            "c.seq AS seq, c.kind AS kind, c.page AS page, c.href AS href, c.url AS url, "
+            "c.para_index AS para_index, c.start_s AS start_s, c.end_s AS end_s",
+            chunk_id=chunk_id,
+        )
+        return rows[0] if rows else None
 
     # -- claims -----------------------------------------------------------
     def upsert_claim(self, claim, embedding: list[float]) -> None:
