@@ -26,3 +26,9 @@ def test_settings_kv_roundtrip_and_upsert(tmp_path):
 
 def test_creates_parent_dirs(tmp_path):
     OpsDB(tmp_path / "nested" / "dir" / "ops.db")  # must not raise
+
+
+def test_wal_mode_is_active(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    mode = db.conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode == "wal"

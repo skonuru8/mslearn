@@ -29,7 +29,9 @@ class OpsDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        mode = self.conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if mode != "wal":
+            raise RuntimeError(f"WAL mode unavailable for {path}; got journal_mode={mode!r}")
         self.conn.executescript(_SCHEMA)
 
     def log_model_call(
