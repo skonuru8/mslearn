@@ -28,6 +28,12 @@ def test_load_source_dispatches_and_chunks(tiny_pdf, tiny_epub):
         assert all(c.source_id == doc.source_id for c in chunks)
 
 
+def test_non_youtube_hosts_are_blog():
+    assert detect_source_type("https://notayoutube.com/watch?v=dQw4w9WgXcQ") == "blog"
+    assert detect_source_type("https://example.com/?ref=youtube.com") == "blog"
+    assert detect_source_type("https://m.youtube.com/watch?v=dQw4w9WgXcQ") == "youtube"
+
+
 def test_load_source_explicit_type_overrides_detection(tiny_pdf):
     doc = load_source(str(tiny_pdf), source_type="pdf", role="spine")
     assert doc.role == "spine"

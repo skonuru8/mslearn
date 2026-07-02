@@ -40,4 +40,4 @@ def load_blog(ref: str, role: str = "supplement") -> SourceDocument:
         resp.raise_for_status()
         return load_blog_html(resp.text, url=ref, role=role)
     path = Path(ref)
-    return load_blog_html(path.read_text(), url=str(path), role=role)
+    return load_blog_html(path.read_text(encoding="utf-8"), url=str(path), role=role)

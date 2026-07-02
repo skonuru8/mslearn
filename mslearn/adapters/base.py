@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 
 
-@dataclass
+@dataclass(frozen=True)
 class Locator:
     kind: str  # "page" | "href" | "url" | "time"
     page: int | None = None          # PDF, 1-based

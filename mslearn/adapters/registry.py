@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import urlparse
 
 from mslearn.adapters.base import SourceDocument
 from mslearn.adapters.blog import load_blog
@@ -13,9 +14,14 @@ _SUFFIX_TYPES = {
 }
 
 
+def _is_youtube(ref: str) -> bool:
+    host = (urlparse(ref).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _YOUTUBE_HOSTS)
+
+
 def detect_source_type(ref: str) -> str:
     if ref.startswith(("http://", "https://")):
-        return "youtube" if any(h in ref for h in _YOUTUBE_HOSTS) else "blog"
+        return "youtube" if _is_youtube(ref) else "blog"
     source_type = _SUFFIX_TYPES.get(Path(ref).suffix.lower())
     if source_type is None:
         raise ValueError(f"cannot detect source type for {ref!r}")

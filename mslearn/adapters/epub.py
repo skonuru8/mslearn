@@ -7,6 +7,17 @@ from mslearn.adapters.base import Locator, SourceDocument, StructuralUnit, make_
 from mslearn.adapters.htmltext import html_to_text
 
 
+_NAV_EXACT_NAMES = {"nav.xhtml", "toc.ncx"}
+
+
+def _is_nav(item) -> bool:
+    if isinstance(item, epub_lib.EpubNav):
+        return True
+    if "nav" in (getattr(item, "properties", None) or []):
+        return True
+    return item.get_name().lower() in _NAV_EXACT_NAMES
+
+
 def load_epub(path: Path | str, role: str = "supplement") -> SourceDocument:
     path = Path(path)
     book = epub_lib.read_epub(str(path))
@@ -15,7 +26,7 @@ def load_epub(path: Path | str, role: str = "supplement") -> SourceDocument:
     units: list[StructuralUnit] = []
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
         name = item.get_name()
-        if "nav" in name.lower():
+        if _is_nav(item):
             continue
         text = html_to_text(item.get_content().decode("utf-8", errors="replace"))
         if not text:

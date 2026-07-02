@@ -1,4 +1,5 @@
 import re
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -77,7 +78,8 @@ def load_youtube(
                 f"no captions for {url!r} and no transcriber provided"
             )
         downloader = download_audio or _default_download_audio
-        audio_path = downloader(url, work_dir or Path("."))
+        target_dir = work_dir or Path(tempfile.mkdtemp(prefix="mslearn-yt-"))
+        audio_path = downloader(url, target_dir)
         for seg in transcriber.transcribe(audio_path):
             text = seg.text.strip()
             if not text:
