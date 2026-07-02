@@ -80,6 +80,6 @@ def test_failure_monitor_pauses_source(ctx, tmp_path):
     chunk_ids = [f"s2:{i}" for i in range(12)]
     db.register_chunk_jobs("s2", chunk_ids)
     set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([]), graph=graph))
-    for cid in chunk_ids[:10]:  # 10 failures (missing chunks), min_chunks=10, rate 10/12 > 0.5
+    for cid in chunk_ids[:10]:  # min_chunks=10, threshold=0.5 — source pauses once failed/total > 0.5 with total>=10 (trips at the 7th failure; remaining iterations skip as paused)
         worker_tasks.extract_chunk_task.delay(cid).get()
     assert db.source_row("s2")["status"] == "paused"

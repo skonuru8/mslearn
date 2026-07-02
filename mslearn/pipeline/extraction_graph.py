@@ -11,7 +11,12 @@ from mslearn.pipeline.contracts import (
 )
 from mslearn.pipeline.trust import check_claim
 from mslearn.prompts import get_prompt
-from mslearn.providers.base import ModelMessage, ModelRequest, ProviderError
+from mslearn.providers.base import (
+    ModelMessage,
+    ModelRequest,
+    ProviderError,
+    ProviderTransientError,
+)
 
 
 class ExtractionState(TypedDict):
@@ -45,6 +50,8 @@ def build_extraction_graph(router, db: OpsDB):
         try:
             response = router.complete(role, request)
             drafts = parse_extraction(response.parsed)
+        except ProviderTransientError:
+            raise
         except ProviderError as exc:
             return {"error": str(exc)[:500], "drafts": []}
         except ExtractionParseError as exc:
