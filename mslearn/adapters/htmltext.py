@@ -17,13 +17,13 @@ class _TextExtractor(HTMLParser):
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag in _SKIP_TAGS:
             self._skip_depth += 1
-        elif tag in _BLOCK_TAGS:
+        elif tag in _BLOCK_TAGS and not self._skip_depth:
             self.parts.append("\n\n")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _SKIP_TAGS and self._skip_depth:
             self._skip_depth -= 1
-        elif tag in _BLOCK_TAGS:
+        elif tag in _BLOCK_TAGS and not self._skip_depth:
             self.parts.append("\n\n")
 
     def handle_data(self, data: str) -> None:
@@ -34,6 +34,7 @@ class _TextExtractor(HTMLParser):
 def html_to_text(html: str) -> str:
     parser = _TextExtractor()
     parser.feed(html)
+    parser.close()
     raw = "".join(parser.parts)
     paragraphs = []
     for block in raw.split("\n\n"):
