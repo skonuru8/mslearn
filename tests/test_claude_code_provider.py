@@ -63,3 +63,11 @@ def test_explicit_model_flag(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run("ok"))
     ClaudeCodeProvider().complete("opus", req())
     assert "--model" in fake_run.last_cmd and "opus" in fake_run.last_cmd
+
+
+def test_non_json_stdout_raises_bad_output(monkeypatch):
+    def _run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="warning: not json", stderr="")
+    monkeypatch.setattr(subprocess, "run", _run)
+    with pytest.raises(ProviderBadOutputError):
+        ClaudeCodeProvider().complete("default", req())

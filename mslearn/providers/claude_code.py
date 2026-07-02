@@ -6,6 +6,7 @@ from mslearn.providers.base import (
     ModelProvider,
     ModelRequest,
     ModelResponse,
+    ProviderBadOutputError,
     ProviderTransientError,
     parse_json_output,
 )
@@ -46,7 +47,12 @@ class ClaudeCodeProvider(ModelProvider):
             raise ProviderTransientError(
                 f"claude exited {proc.returncode}: {proc.stderr[:500]}"
             )
-        data = json.loads(proc.stdout)
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            raise ProviderBadOutputError(
+                f"claude produced non-JSON output: {proc.stdout[:200]!r}"
+            ) from exc
         text = data.get("result", "")
         parsed = parse_json_output(text) if request.json_schema is not None else None
         usage = data.get("usage") or {}
