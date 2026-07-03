@@ -69,6 +69,20 @@ OpenRouter documents `"reasoning": {"enabled": false}`; support is model-specifi
 - If a live key is available: one live call to v4-flash with `params: {reasoning: {enabled: false}}`; if accepted and content is immediate (no reasoning tokens in usage), switch the `interactive` role to v4-flash with that param and drop deepseek-chat. If rejected/ignored → keep deepseek-chat, document the result in this plan file.
 - Never block the rest of the plan on this.
 
+**Result (empirical, live-verified 2026-07-03, `MSL_OPENROUTER_API_KEY` present in `.env`):** the param is honored.
+
+Two probe calls to `deepseek/deepseek-v4-flash` via a throwaway scratchpad script (not committed), prompt: *"A user says: 'I think the capital of France is Lyon.' Briefly correct them."*
+
+| | without param | `reasoning: {enabled: false}` |
+|---|---|---|
+| `content` | correct, non-null | correct, non-null |
+| `finish_reason` | `stop` | `stop` |
+| `completion_tokens` | 50 | 11 |
+| `reasoning_tokens` | 34 | 0 |
+| `cost` (USD) | 1.708e-05 | 4.312e-06 (~4x cheaper) |
+
+No reasoning tokens, immediate correct content, no rejection/ignoring of the param. `profiles.yaml`'s `openrouter` profile `interactive` role now uses `deepseek/deepseek-v4-flash` with `params: {reasoning: {enabled: false}}`, dropping `deepseek/deepseek-chat`. `tests/test_router.py::test_provider_error_logs_role_and_model` updated to assert the new model id.
+
 ## Task 8 (lower priority) — Curriculum N+1
 
 `CurriculumView.tsx:23-30` fires one `GET /api/study/concepts/{id}` per concept just for conflict badge counts. Add `conflict_count` to the `/api/study/curriculum` rows (one Cypher aggregate in `store.py`), drop the fan-out.

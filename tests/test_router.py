@@ -137,7 +137,7 @@ def test_provider_error_logs_role_and_model(env, caplog):
         router.complete("interactive", request())
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any(
-        "role=interactive" in m and "deepseek/deepseek-chat" in m and "kaboom" in m
+        "role=interactive" in m and "deepseek/deepseek-v4-flash" in m and "kaboom" in m
         for m in warnings
     )
 

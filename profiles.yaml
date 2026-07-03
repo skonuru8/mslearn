@@ -6,7 +6,12 @@ profiles:
     roles:
       extraction:  {provider: openrouter,     model: "deepseek/deepseek-v4-flash"}
       synthesis:   {provider: openrouter, model: "deepseek/deepseek-v4-flash"}
-      interactive: {provider: openrouter, model: "deepseek/deepseek-chat"}
+      # Plan 11 Task 7 (empirical, live-verified 2026-07-03): v4-flash honors
+      # reasoning.enabled=false — reasoning_tokens drops to 0, content comes
+      # back immediately, and cost dropped ~4x on the probe call. Replaces
+      # deepseek-chat so interactive (chat/teach/quiz) shares the same model
+      # as extraction/synthesis/evals without paying for hidden reasoning.
+      interactive: {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
       evals:       {provider: openrouter, model: "deepseek/deepseek-v4-flash"}
       embedding:   {provider: ollama,     model: "nomic-embed-text"}
 
