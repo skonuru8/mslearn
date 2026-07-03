@@ -113,6 +113,33 @@ def test_quiz_next_generates_reasoning_question_and_caches_pending(tmp_path):
     ]
 
 
+def test_quiz_question_excludes_rejected_claims(tmp_path):
+    router = CapturingScriptedRouter(
+        [{"question": "Why TTL?", "expected_points": ["TTL bounds stale data [claim:c1]."]}]
+    )
+    ctx = make_ctx(tmp_path, router)
+    ctx.graph.add_claim(
+        "c3",
+        "Rejected bogus quiz fact.",
+        "neutral",
+        "s3",
+        [0.5, 0.5],
+        trust="rejected",
+        quote="bogus",
+        chunk_id="ch3",
+    )
+    ctx.graph.assign_claim("c3", "k1")
+
+    with make_client(ctx) as client:
+        response = client.get("/api/quiz/next")
+
+    assert response.status_code == 200
+    prompt = router.requests[0].messages[0].content
+    assert "Rejected bogus quiz fact" not in prompt
+    assert "[claim:c3]" not in prompt
+    assert "[claim:c1]" in prompt
+
+
 def test_quiz_next_prefers_recent_failures_before_unquizzed_concepts(tmp_path):
     router = CapturingScriptedRouter(
         [

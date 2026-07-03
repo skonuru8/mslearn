@@ -6,6 +6,8 @@ from typing import Any
 from mslearn.prompts import get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest, ProviderBadOutputError
 
+_TRUSTED = frozenset({"trusted", "escalated"})
+
 _QUESTION_SCHEMA = {
     "type": "object",
     "required": ["question", "expected_points"],
@@ -63,7 +65,7 @@ def generate_question(ctx, concept_id: str) -> dict:
     concept = ctx.graph.get_concept(concept_id)
     if concept is None:
         raise KeyError(f"unknown concept {concept_id!r}")
-    claims = ctx.graph.claims_in_concept(concept_id)
+    claims = _trusted_claims(ctx.graph.claims_in_concept(concept_id))
     response = ctx.router.complete(
         "synthesis",
         ModelRequest(
@@ -157,6 +159,10 @@ def _grade_prompt(base: str, pending: dict, answer: str) -> str:
         expected_points="\n".join(f"- {point}" for point in pending.get("expected_points", [])),
         answer=answer,
     )
+
+
+def _trusted_claims(claims: list[dict]) -> list[dict]:
+    return [c for c in claims if c.get("trust", "trusted") in _TRUSTED]
 
 
 def _format_claims(claims: list[dict]) -> str:

@@ -42,6 +42,6 @@ def build_default_context() -> PipelineContext:
         from mslearn.memory.mem0_impl import Mem0Memory
 
         memory = Mem0Memory(settings, db)
-    except ImportError:
-        logger.warning("mem0 not installed; learner memory disabled")
+    except Exception as exc:
+        logger.warning("learner memory disabled: %s", exc)
     return PipelineContext(settings=settings, db=db, router=router, graph=graph, memory=memory)

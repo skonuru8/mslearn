@@ -32,17 +32,6 @@ def test_mem0_import_is_lazy():
 
 
 def test_build_default_context_memory_none_when_mem0_missing(monkeypatch, tmp_path):
-    import builtins
-
-    real_import = builtins.__import__
-
-    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "mem0" or name.startswith("mem0."):
-            raise ImportError("mem0 not installed")
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-
     from mslearn.settings import Settings
     from mslearn.worker.context import build_default_context
 
@@ -56,6 +45,11 @@ def test_build_default_context_memory_none_when_mem0_missing(monkeypatch, tmp_pa
             neo4j_password="learnsys",
         ),
     )
+
+    def _raise_import(*_args, **_kwargs):
+        raise ImportError("mem0 not installed")
+
+    monkeypatch.setattr("mslearn.memory.mem0_impl.Mem0Memory", _raise_import)
 
     ctx = build_default_context()
     assert ctx.memory is None

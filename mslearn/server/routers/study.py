@@ -29,7 +29,11 @@ def concept(concept_id: str, ctx=Depends(get_ctx)):
     concept_row = ctx.graph.get_concept(concept_id)
     if concept_row is None:
         raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
-    claims = ctx.graph.claims_in_concept(concept_id)
+    claims = [
+        c
+        for c in ctx.graph.claims_in_concept(concept_id)
+        if c.get("trust", "trusted") in {"trusted", "escalated"}
+    ]
     return {
         "concept": concept_row,
         "claims": claims,

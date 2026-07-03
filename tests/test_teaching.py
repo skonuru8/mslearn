@@ -162,3 +162,27 @@ def test_generate_teaching_includes_memory_hints_as_personalization_only(tmp_pat
     assert "PERSONALIZATION ONLY:" in prompt
     assert "learner likes database examples" in prompt
     assert router.requests[0].json_schema is None
+
+
+def test_generate_teaching_excludes_rejected_claims(tmp_path):
+    router = TeachingRouter([good_markdown()])
+    ctx = make_ctx(tmp_path, router)
+    seed_concept(ctx.graph)
+    ctx.graph.add_claim(
+        "c2",
+        "Rejected bogus fact.",
+        "neutral",
+        "s2",
+        [0.0, 1.0],
+        trust="rejected",
+        quote="bogus",
+        chunk_id="ch2",
+    )
+    ctx.graph.assign_claim("c2", "k1")
+
+    generate_teaching(ctx, "k1")
+
+    prompt = router.requests[0].messages[0].content
+    assert "[claim:c1]" in prompt
+    assert "Rejected bogus fact" not in prompt
+    assert "[claim:c2]" not in prompt

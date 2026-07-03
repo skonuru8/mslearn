@@ -3,6 +3,8 @@ from __future__ import annotations
 from mslearn.prompts import domain_guidance, get_domain_profile, get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest
 
+_TRUSTED = frozenset({"trusted", "escalated"})
+
 
 class TeachingError(Exception):
     """Teaching generation failed its required output contract."""
@@ -18,7 +20,9 @@ def generate_teaching(ctx, concept_id: str, force: bool = False) -> str:
     if cached and not force and not concept.get("dirty", False):
         return cached
 
-    prompt = _build_prompt(ctx, concept, graph.claims_in_concept(concept_id))
+    prompt = _build_prompt(
+        ctx, concept, _trusted_claims(graph.claims_in_concept(concept_id))
+    )
     markdown = _complete_teaching(ctx, prompt)
     conflicts = graph.conflicts_in_concept(concept_id)
     if conflicts and "## Where sources disagree" not in markdown:
@@ -34,6 +38,10 @@ def generate_teaching(ctx, concept_id: str, force: bool = False) -> str:
     graph.set_concept_teaching(concept_id, markdown)
     graph.mark_concept_dirty(concept_id, False)
     return markdown
+
+
+def _trusted_claims(claims: list[dict]) -> list[dict]:
+    return [c for c in claims if c.get("trust", "trusted") in _TRUSTED]
 
 
 def _complete_teaching(ctx, content: str) -> str:

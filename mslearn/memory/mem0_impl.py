@@ -21,7 +21,6 @@ class Mem0Memory:
         self._settings = settings
         self._db = db
         self._client: Any | None = None
-        self._ensure_client()
 
     def _ensure_client(self) -> Any:
         if self._client is not None:
