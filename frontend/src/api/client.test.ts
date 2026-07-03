@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, api, parseSseBuffer, uploadSource } from "./client";
+import { setActiveProjectId } from "./projectId";
 
 function makeFakeXHRClass(status: number, response: unknown, statusText = "OK") {
   return class FakeXHR {
@@ -13,6 +14,8 @@ function makeFakeXHRClass(status: number, response: unknown, statusText = "OK") 
     responseText = "";
 
     open(_method: string, _url: string): void {}
+
+    setRequestHeader(_name: string, _value: string): void {}
 
     send(_body: FormData): void {
       this.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 });
@@ -49,6 +52,7 @@ describe("parseSseBuffer", () => {
 
 describe("api", () => {
   it("throws ApiError with backend detail", async () => {
+    setActiveProjectId("default");
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -63,6 +67,25 @@ describe("api", () => {
       expect.objectContaining({ message: "bad ref", status: 422 }),
     );
     expect(await api("/api/corpus/sources").catch((e) => e)).toBeInstanceOf(ApiError);
+  });
+
+  it("sends X-Project-Id on requests", async () => {
+    setActiveProjectId("biology");
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ([]),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api("/api/corpus/sources");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/corpus/sources",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+      }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect((init.headers as Headers).get("X-Project-Id")).toBe("biology");
   });
 });
 

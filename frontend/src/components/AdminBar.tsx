@@ -80,8 +80,8 @@ export function AdminBar() {
 
   return (
     <div>
-      <div className="admin-bar">
-        <strong>mslearn</strong>
+      <div className="admin-bar" aria-label="Advanced settings">
+        <strong>Advanced</strong>
         <span
           className={`worker-chip ${health?.worker ? "online" : "offline"}`}
           title="Background jobs (ingestion, synthesis) need a Celery worker process running alongside the API. See README.md (scripts/dev_up.sh / make run)."

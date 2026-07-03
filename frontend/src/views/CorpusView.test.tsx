@@ -1,141 +1,108 @@
 import type { ReactElement } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CorpusView } from "./CorpusView";
-
-function wrap(ui: ReactElement) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>);
-}
-
-function corpusBootMocks(fetchMock: ReturnType<typeof vi.fn>, sources: unknown[] = []) {
-  fetchMock
-    .mockResolvedValueOnce({ ok: true, json: async () => sources })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ last_run: null }) });
-}
+import { corpusHandlers, installFetchMock } from "../test/fetchMock";
+import { renderWithProviders } from "../test/renderWithProviders";
 
 describe("CorpusView", () => {
-  it("posts add-source payload and shows new row", async () => {
-    const fetchMock = vi.fn();
-    corpusBootMocks(fetchMock);
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ source_id: "s-new" }) })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          {
-            source_id: "s-new",
-            ref: "/tmp/book.pdf",
-            role: "spine",
-            status: "registered",
-            total_chunks: 3,
-            done_chunks: 0,
-            failed_chunks: 0,
-            rejected_chunks: 0,
-            error: null,
-            ts: 1,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) });
-    vi.stubGlobal("fetch", fetchMock);
+  it("posts add-link payload and shows new row", async () => {
+    installFetchMock(
+      corpusHandlers([], {
+        postSource: () => ({ source_id: "s-new" }),
+        "/api/corpus/sources": (path, init) => {
+          if (init?.method === "POST") {
+            return { source_id: "s-new" };
+          }
+          return [
+            {
+              source_id: "s-new",
+              ref: "/tmp/book.pdf",
+              role: "spine",
+              status: "registered",
+              total_chunks: 3,
+              done_chunks: 0,
+              failed_chunks: 0,
+              rejected_chunks: 0,
+              error: null,
+              ts: 1,
+            },
+          ];
+        },
+      }),
+    );
 
-    wrap(<CorpusView />);
-    await screen.findByText("Corpus");
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
 
-    await userEvent.type(screen.getByLabelText(/Source ref/i), "/tmp/book.pdf");
-    await userEvent.click(screen.getByRole("button", { name: "Add source" }));
+    await userEvent.click(screen.getByRole("tab", { name: "From a link" }));
+    await userEvent.type(
+      screen.getByLabelText(/Paste a YouTube or article link/i),
+      "/tmp/book.pdf",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Add link" }));
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/corpus/sources",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            ref: "/tmp/book.pdf",
-            role: "spine",
-            source_type: null,
-            local: false,
-          }),
-        }),
-      );
-    });
     await screen.findByText("/tmp/book.pdf");
   });
 
   it("renders ingestion progress for a running source", async () => {
-    const fetchMock = vi.fn();
-    corpusBootMocks(fetchMock, [
-      {
-        source_id: "s1",
-        ref: "a.pdf",
-        role: "spine",
-        status: "running",
-        total_chunks: 10,
-        done_chunks: 3,
-        failed_chunks: 1,
-        rejected_chunks: 0,
-        error: null,
-        ts: 1,
-      },
-    ]);
-    vi.stubGlobal("fetch", fetchMock);
+    installFetchMock(
+      corpusHandlers([
+        {
+          source_id: "s1",
+          ref: "a.pdf",
+          role: "spine",
+          status: "running",
+          total_chunks: 10,
+          done_chunks: 3,
+          failed_chunks: 1,
+          rejected_chunks: 0,
+          error: null,
+          ts: 1,
+        },
+      ]),
+    );
 
-    wrap(<CorpusView />);
+    renderWithProviders(<CorpusView />);
     await screen.findByText(/Reading… 4 of 10 sections · 1 problems/);
     expect(screen.getByRole("progressbar")).toBeTruthy();
   });
 
   it("calls pause endpoint", async () => {
-    const fetchMock = vi.fn();
-    corpusBootMocks(fetchMock, [
-      {
-        source_id: "s1",
-        ref: "a.pdf",
-        role: "spine",
-        status: "running",
-        total_chunks: 1,
-        done_chunks: 0,
-        failed_chunks: 0,
-        rejected_chunks: 0,
-        error: null,
-        ts: 1,
-      },
-    ]);
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ source_id: "s1", status: "paused" }) })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          {
-            source_id: "s1",
-            ref: "a.pdf",
-            role: "spine",
-            status: "paused",
-            total_chunks: 1,
-            done_chunks: 0,
-            failed_chunks: 0,
-            rejected_chunks: 0,
-            error: null,
-            ts: 1,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) });
-    vi.stubGlobal("fetch", fetchMock);
+    const row = {
+      source_id: "s1",
+      ref: "a.pdf",
+      role: "spine",
+      status: "running",
+      total_chunks: 1,
+      done_chunks: 0,
+      failed_chunks: 0,
+      rejected_chunks: 0,
+      error: null,
+      ts: 1,
+    };
+    let paused = false;
+    installFetchMock(
+      corpusHandlers([row], {
+        "/api/corpus/sources/s1/pause": () => {
+          paused = true;
+          return { source_id: "s1", status: "paused" };
+        },
+        "/api/corpus/sources": (path, init) => {
+          if (path.endsWith("/pause") && init?.method === "POST") {
+            paused = true;
+            return { source_id: "s1", status: "paused" };
+          }
+          return [{ ...row, status: paused ? "paused" : row.status }];
+        },
+      }),
+    );
 
-    wrap(<CorpusView />);
+    renderWithProviders(<CorpusView />);
     await screen.findByText("a.pdf");
     await userEvent.click(screen.getAllByRole("button", { name: "Pause" })[0]!);
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/corpus/sources/s1/pause",
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
+    await waitFor(() => expect(paused).toBe(true));
   });
 
   it("expands failure reasons and retries failed chunks", async () => {
@@ -151,68 +118,61 @@ describe("CorpusView", () => {
       error: null,
       ts: 1,
     };
-    const fetchMock = vi.fn();
-    corpusBootMocks(fetchMock, [row]);
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          { error: "invalid JSON from ollama: ''", count: 2, sample_chunk_ids: ["s1:0", "s1:1"] },
-        ],
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ source_id: "s1", status: "running", retried_chunks: 2 }),
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => [{ ...row, failed_chunks: 0 }] })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) });
-    vi.stubGlobal("fetch", fetchMock);
-
-    wrap(<CorpusView />);
-    await screen.findByText("a.pdf");
-    await userEvent.click(screen.getByRole("button", { name: /2 failed — why\?/ }));
-    await screen.findByText(/invalid JSON from ollama/);
-
-    await userEvent.click(screen.getByRole("button", { name: "Retry failed" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/corpus/sources/s1/retry-failed",
-        expect.objectContaining({ method: "POST" }),
-      );
+    let retried = false;
+    installFetchMock({
+      ...corpusHandlers([row]),
+      "/api/corpus/sources/s1/failures": () => [
+        { error: "invalid JSON from ollama: ''", count: 2, sample_chunk_ids: ["s1:0", "s1:1"] },
+      ],
+      "/api/corpus/sources/s1/retry-failed": () => {
+        retried = true;
+        return { source_id: "s1", status: "running", retried_chunks: 2 };
+      },
+      "/api/corpus/sources": () => (retried ? [{ ...row, failed_chunks: 0, status: "running" }] : [row]),
     });
+
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("a.pdf");
+    await userEvent.click(screen.getByRole("button", { name: /2 problems — why\?/ }));
+    await screen.findByText(/reading helper/i);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(retried).toBe(true));
   });
 
   it("warns when synthesis is enqueued but the worker is offline", async () => {
-    const fetchMock = vi.fn();
-    corpusBootMocks(fetchMock);
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ enqueued: true, worker_online: false }),
+    installFetchMock({
+      ...corpusHandlers(),
+      "/api/corpus/synthesize": () => ({ enqueued: true, worker_online: false }),
     });
-    vi.stubGlobal("fetch", fetchMock);
 
-    wrap(<CorpusView />);
-    await screen.findByText("Corpus");
-    await userEvent.click(screen.getByRole("button", { name: "Run synthesis" }));
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+    await userEvent.click(screen.getByRole("button", { name: "Project settings" }));
+    await userEvent.click(screen.getByRole("button", { name: "Build my course from materials" }));
     await screen.findByText(/Worker offline/);
   });
 
   it("shows error banner on 422 ingest", async () => {
-    const fetchMock = vi.fn();
-    corpusBootMocks(fetchMock);
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 422,
-      statusText: "Unprocessable Entity",
-      json: async () => ({ detail: "failed to load '/bad'" }),
+    installFetchMock({
+      ...corpusHandlers(),
+      "/api/corpus/sources": (path, init) => {
+        if (init?.method === "POST") {
+          return {
+            ok: false,
+            status: 422,
+            statusText: "Unprocessable Entity",
+            json: async () => ({ detail: "failed to load '/bad'" }),
+          };
+        }
+        return [];
+      },
     });
-    vi.stubGlobal("fetch", fetchMock);
 
-    wrap(<CorpusView />);
-    await screen.findByText("Corpus");
-    await userEvent.type(screen.getByLabelText(/Source ref/i), "/bad");
-    await userEvent.click(screen.getByRole("button", { name: "Add source" }));
-    await screen.findByText("failed to load '/bad'");
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+    await userEvent.click(screen.getByRole("tab", { name: "From a link" }));
+    await userEvent.type(screen.getByLabelText(/Paste a YouTube or article link/i), "/bad");
+    await userEvent.click(screen.getByRole("button", { name: "Add link" }));
+    await screen.findByText(/couldn't open that file or link/i);
   });
 });

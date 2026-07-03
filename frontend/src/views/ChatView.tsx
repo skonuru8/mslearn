@@ -1,7 +1,12 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { streamChat } from "../api/client";
+import { Link } from "react-router-dom";
+import { api, streamChat } from "../api/client";
+import { getActiveProjectId } from "../api/projectId";
+import type { SourceRow } from "../api/types";
+import { useProject } from "../context/ProjectContext";
 import { ErrorBanner } from "../components/Status";
+import { translateError } from "../utils/userMessages";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -9,36 +14,50 @@ type ChatMessage = {
   citations?: string[];
 };
 
-const SESSION_KEY = "mslearn.chat.session";
+function sessionStorageKey(projectId: string): string {
+  return `mslearn.chat.session.${projectId}`;
+}
 
-function sessionId(): string {
-  const existing = sessionStorage.getItem(SESSION_KEY);
+function sessionId(projectId: string): string {
+  const key = sessionStorageKey(projectId);
+  const existing = sessionStorage.getItem(key);
   if (existing) {
     return existing;
   }
   const created = crypto.randomUUID();
-  sessionStorage.setItem(SESSION_KEY, created);
+  sessionStorage.setItem(key, created);
   return created;
 }
 
 export function ChatView() {
+  const { projectId } = useProject();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sid = useMemo(() => sessionId(), []);
+  const [hasMaterials, setHasMaterials] = useState<boolean | null>(null);
+  const sid = useMemo(() => sessionId(projectId), [projectId]);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
-      abortRef.current?.abort(); // cancel in-flight stream on unmount
+      abortRef.current?.abort();
     };
   }, []);
 
   useEffect(() => {
+    setMessages([]);
     void (async () => {
       try {
-        const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sid)}`);
+        const sources = await api<SourceRow[]>("/api/corpus/sources");
+        setHasMaterials(sources.some((row) => row.status === "done" || row.done_chunks > 0));
+      } catch {
+        setHasMaterials(null);
+      }
+      try {
+        const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sid)}`, {
+          headers: { "X-Project-Id": getActiveProjectId() },
+        });
         if (!response.ok) {
           return;
         }
@@ -53,7 +72,7 @@ export function ChatView() {
         // transient history optional
       }
     })();
-  }, [sid]);
+  }, [sid, projectId]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -96,10 +115,10 @@ export function ChatView() {
       );
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        return; // unmount/navigation — no error UI
+        return;
       }
-      setError(err instanceof Error ? err.message : "Chat failed");
-      // Keep any partial streamed content; drop only an empty assistant bubble.
+      const raw = err instanceof Error ? err.message : "Chat failed";
+      setError(translateError(raw).message);
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last?.role === "assistant" && last.content === "") {
@@ -114,8 +133,24 @@ export function ChatView() {
 
   return (
     <section className="panel">
-      <h1>Chat</h1>
+      <h1>Ask questions</h1>
       <ErrorBanner message={error} />
+      {hasMaterials === false ? (
+        <div className="onboarding-card">
+          <h2>Add something to read first</h2>
+          <p className="hint">
+            Questions work best after you add a book or video and it finishes reading.
+          </p>
+          <ol className="onboarding-steps">
+            <li>Add material in <Link to="/corpus">My materials</Link></li>
+            <li>Wait for &ldquo;Ready to study&rdquo;</li>
+            <li>Ask anything about what you uploaded</li>
+          </ol>
+          <Link to="/corpus" className="button-link primary">
+            Add learning material
+          </Link>
+        </div>
+      ) : null}
       <div className="chat-log">
         {messages.map((message, index) => (
           <div key={index} className={`chat-bubble ${message.role}`}>
@@ -134,8 +169,14 @@ export function ChatView() {
       </div>
       <form className="form-grid" onSubmit={(event) => void onSubmit(event)}>
         <label>
-          Question
-          <textarea rows={3} value={input} onChange={(event) => setInput(event.target.value)} disabled={streaming} />
+          Your question
+          <textarea
+            rows={3}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            disabled={streaming}
+            placeholder="Ask about something in your materials…"
+          />
         </label>
         <button type="submit" className="primary" disabled={streaming || !input.trim()}>
           Send

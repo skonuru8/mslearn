@@ -1,3 +1,9 @@
+export interface ProjectRow {
+  project_id: string;
+  name: string;
+  created_ts: number;
+}
+
 export interface ProfileInfo {
   active: string;
   available: string[];

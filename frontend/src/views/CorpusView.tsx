@@ -1,5 +1,6 @@
 import type { FormEvent } from "react";
 import { Fragment, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, uploadSource } from "../api/client";
 import type {
   DomainProfileResponse,
@@ -10,7 +11,11 @@ import type {
   SynthesisStatusResponse,
   SynthesizeResponse,
 } from "../api/types";
+import { useProject } from "../context/ProjectContext";
 import { ErrorBanner, Loading } from "../components/Status";
+import { detectSourceTypeFromUrl, sourceStatusLabel, translateError } from "../utils/userMessages";
+
+type AddTab = "file" | "link";
 
 function isActiveSource(row: SourceRow): boolean {
   return row.status === "running" || row.status === "chunking";
@@ -49,21 +54,42 @@ function formatSynthesisAgo(ts: number): string {
   return `${minutes} min ago`;
 }
 
+function roleLabel(role: string): string {
+  return role === "spine" ? "Main course" : "Extra reading";
+}
+
 export function CorpusView() {
+  const { projectId } = useProject();
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [domainProfile, setDomainProfile] = useState("technical");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [ref, setRef] = useState("");
-  const [role, setRole] = useState("spine");
-  const [sourceType, setSourceType] = useState("");
+  const [errorTechnical, setErrorTechnical] = useState<string | null>(null);
+  const [addTab, setAddTab] = useState<AddTab>("file");
+  const [linkRef, setLinkRef] = useState("");
+  const [isMainCourse, setIsMainCourse] = useState(true);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
   const [failures, setFailures] = useState<Record<string, FailureGroup[]>>({});
   const [synthMsg, setSynthMsg] = useState<string | null>(null);
   const [synthesisStatus, setSynthesisStatus] = useState<SynthesisStatusResponse | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  const role = isMainCourse ? "spine" : "supplement";
+
+  function setUserError(message: string | null, technical: string | null = null) {
+    setError(message);
+    setErrorTechnical(technical);
+  }
+
+  function captureError(err: unknown, fallback: string) {
+    const raw = err instanceof Error ? err.message : fallback;
+    const translated = translateError(raw);
+    setUserError(translated.message, translated.technical);
+  }
 
   const refreshSources = useCallback(async () => {
     const [rows, profile] = await Promise.all([
@@ -79,9 +105,9 @@ export function CorpusView() {
     setLoading(true);
     try {
       await refreshSources();
-      setError(null);
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load corpus");
+      captureError(err, "Failed to load your materials");
     } finally {
       setLoading(false);
     }
@@ -98,7 +124,7 @@ export function CorpusView() {
   useEffect(() => {
     void load();
     void refreshSynthesisStatus();
-  }, [load, refreshSynthesisStatus]);
+  }, [load, refreshSynthesisStatus, projectId]);
 
   useEffect(() => {
     if (!sources.some(isActiveSource)) {
@@ -106,21 +132,27 @@ export function CorpusView() {
     }
     const timer = window.setInterval(() => {
       void refreshSources().catch(() => {
-        /* keep polling; transient errors surface on manual actions */
+        /* keep polling */
       });
     }, 3000);
     return () => window.clearInterval(timer);
   }, [sources, refreshSources]);
 
-  async function onSubmit(event: FormEvent) {
+  function onFileChosen(file: File | null) {
+    setUploadFile(file);
+    setUserError(null);
+  }
+
+  async function onAddLink(event: FormEvent) {
     event.preventDefault();
     try {
+      const sourceType = detectSourceTypeFromUrl(linkRef);
       const result = await api<IngestResponse>("/api/corpus/sources", {
         method: "POST",
         body: JSON.stringify({
-          ref,
+          ref: linkRef.trim(),
           role,
-          source_type: sourceType || null,
+          source_type: sourceType,
           local: false,
         }),
       });
@@ -129,17 +161,17 @@ export function CorpusView() {
       if (row) {
         setSources([row, ...rows.filter((item) => item.source_id !== result.source_id)]);
       }
-      setRef("");
-      setError(null);
+      setLinkRef("");
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ingest failed");
+      captureError(err, "Could not add that link");
     }
   }
 
   async function onUpload(event: FormEvent) {
     event.preventDefault();
     if (!uploadFile) {
-      setError("Choose a file first");
+      setUserError("Choose a file first");
       return;
     }
     setUploading(true);
@@ -149,9 +181,9 @@ export function CorpusView() {
       setUploadFile(null);
       setUploadPercent(null);
       await refreshSources();
-      setError(null);
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      captureError(err, "Upload failed");
     } finally {
       setUploading(false);
       setUploadPercent(null);
@@ -164,9 +196,9 @@ export function CorpusView() {
         method: "POST",
       });
       await refreshSources();
-      setError(null);
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : `${action} failed`);
+      captureError(err, `${action} failed`);
     }
   }
 
@@ -177,9 +209,9 @@ export function CorpusView() {
         body: JSON.stringify({ profile: value }),
       });
       setDomainProfile(result.profile);
-      setError(null);
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid domain profile");
+      captureError(err, "Could not save project setting");
     }
   }
 
@@ -194,9 +226,9 @@ export function CorpusView() {
       );
       setFailures((prev) => ({ ...prev, [sourceId]: groups }));
       setExpandedSource(sourceId);
-      setError(null);
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load failure reasons");
+      captureError(err, "Failed to load problem details");
     }
   }
 
@@ -208,9 +240,9 @@ export function CorpusView() {
       );
       setExpandedSource(null);
       await refreshSources();
-      setError(null);
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Retry failed");
+      captureError(err, "Retry failed");
     }
   }
 
@@ -225,9 +257,9 @@ export function CorpusView() {
       } else {
         setSynthMsg("Synthesis queued — the background worker will process it shortly.");
       }
-      setError(null);
+      setUserError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Synthesis enqueue failed");
+      captureError(err, "Synthesis could not start");
     }
   }
 
@@ -239,99 +271,177 @@ export function CorpusView() {
 
   return (
     <section className="panel">
-      <h1>Corpus</h1>
+      <h1>My materials</h1>
       <ErrorBanner message={error} />
+      {error && errorTechnical && errorTechnical !== error ? (
+        <details className="technical-details">
+          <summary>Show technical details</summary>
+          <pre>{errorTechnical}</pre>
+        </details>
+      ) : null}
 
-      <form className="form-grid" onSubmit={(event) => void onUpload(event)}>
-        <label>
-          Upload a file from this computer (pdf, epub, html, audio)
+      <div className="add-material-card">
+        <h2>Add learning material</h2>
+        <div className="tab-row" role="tablist" aria-label="How to add material">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={addTab === "file"}
+            className={addTab === "file" ? "active" : undefined}
+            onClick={() => setAddTab("file")}
+          >
+            From my computer
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={addTab === "link"}
+            className={addTab === "link" ? "active" : undefined}
+            onClick={() => setAddTab("link")}
+          >
+            From a link
+          </button>
+        </div>
+
+        <label className="toggle-row">
           <input
-            type="file"
-            accept=".pdf,.epub,.html,.htm,.mp3,.m4a,.wav,.flac,.ogg"
-            onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+            type="checkbox"
+            checked={isMainCourse}
+            onChange={(event) => setIsMainCourse(event.target.checked)}
           />
+          <span>
+            <strong>Is this your main book or course?</strong>
+            <span className="hint">
+              Turn on for your primary textbook or course videos. Turn off for extra articles or
+              side readings.
+            </span>
+          </span>
         </label>
-        {uploadPercent !== null ? (
-          <div className="upload-progress">
-            <progress max={100} value={uploadPercent} />
-            <span>Uploading… {uploadPercent}%</span>
+
+        {addTab === "file" ? (
+          <form className="form-grid" onSubmit={(event) => void onUpload(event)}>
+            <div
+              className={`drop-zone ${dragOver ? "drag-over" : ""}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragOver(false);
+                onFileChosen(event.dataTransfer.files?.[0] ?? null);
+              }}
+            >
+              <p>Drag and drop a PDF, EPUB, web page, or audio file here</p>
+              <label className="browse-label">
+                Browse
+                <input
+                  type="file"
+                  accept=".pdf,.epub,.html,.htm,.mp3,.m4a,.wav,.flac,.ogg"
+                  onChange={(event) => onFileChosen(event.target.files?.[0] ?? null)}
+                />
+              </label>
+              {uploadFile ? <p className="hint">Selected: {uploadFile.name}</p> : null}
+            </div>
+            {uploadPercent !== null ? (
+              <div className="upload-progress">
+                <progress max={100} value={uploadPercent} />
+                <span>Uploading… {uploadPercent}%</span>
+              </div>
+            ) : null}
+            <button type="submit" className="primary" disabled={!uploadFile || uploading}>
+              {uploading ? "Uploading…" : "Add file"}
+            </button>
+          </form>
+        ) : (
+          <form className="form-grid" onSubmit={(event) => void onAddLink(event)}>
+            <label>
+              Paste a YouTube or article link
+              <input
+                value={linkRef}
+                onChange={(event) => setLinkRef(event.target.value)}
+                placeholder="https://…"
+                required
+              />
+            </label>
+            <button type="submit" className="primary" disabled={!linkRef.trim()}>
+              Add link
+            </button>
+          </form>
+        )}
+      </div>
+
+      <div className="settings-block">
+        <button
+          type="button"
+          className="settings-toggle"
+          aria-expanded={showSettings}
+          onClick={() => setShowSettings((open) => !open)}
+        >
+          Project settings
+        </button>
+        {showSettings ? (
+          <div className="settings-panel">
+            <label>
+              When sources disagree, treat this subject as
+              <select
+                value={domainProfile}
+                onChange={(event) => void onDomainProfileChange(event.target.value)}
+              >
+                <option value="technical">Facts &amp; techniques</option>
+                <option value="interpretive">Opinions &amp; interpretations</option>
+              </select>
+            </label>
+            <p className="hint">
+              <button type="button" onClick={() => void onSynthesize()}>
+                Build my course from materials
+              </button>
+              {" — "}
+              turns your reading notes into study topics.
+            </p>
           </div>
         ) : null}
-        <button type="submit" className="primary" disabled={!uploadFile || uploading}>
-          {uploading ? "Uploading…" : "Upload & ingest"}
-        </button>
-      </form>
+      </div>
 
-      <form className="form-grid" onSubmit={(event) => void onSubmit(event)}>
-        <label>
-          Or source ref (URL — blog post, YouTube — or server path)
-          <input value={ref} onChange={(event) => setRef(event.target.value)} required />
-        </label>
-        <label>
-          Role
-          <select value={role} onChange={(event) => setRole(event.target.value)}>
-            <option value="spine">spine</option>
-            <option value="supplement">supplement</option>
-          </select>
-        </label>
-        <label>
-          Source type (optional)
-          <select value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
-            <option value="">auto</option>
-            <option value="pdf">pdf</option>
-            <option value="epub">epub</option>
-            <option value="blog">blog</option>
-            <option value="youtube">youtube</option>
-            <option value="audio">audio</option>
-          </select>
-        </label>
-        <button type="submit" className="primary">
-          Add source
-        </button>
-      </form>
-
-      <p style={{ marginTop: "1.5rem" }}>
-        <label>
-          Domain profile{" "}
-          <select
-            value={domainProfile}
-            onChange={(event) => void onDomainProfileChange(event.target.value)}
-          >
-            <option value="technical">technical</option>
-            <option value="interpretive">interpretive</option>
-          </select>
-        </label>{" "}
-        <button type="button" onClick={() => void onSynthesize()}>
-          Run synthesis
-        </button>
-      </p>
-      {synthMsg ? <div className={`synth-notice ${synthMsg.includes("offline") ? "warn" : ""}`}>{synthMsg}</div> : null}
+      {synthMsg ? (
+        <div className={`synth-notice ${synthMsg.includes("offline") ? "warn" : ""}`}>{synthMsg}</div>
+      ) : null}
       {lastRun ? (
         <p className="hint">
-          Last synthesis: {lastRun.processed_concepts} concepts updated, curriculum length{" "}
-          {lastRun.curriculum_len} ({formatSynthesisAgo(lastRun.ts)})
+          Last course update: {lastRun.processed_concepts} topics refreshed, {lastRun.curriculum_len}{" "}
+          in your course ({formatSynthesisAgo(lastRun.ts)})
         </p>
       ) : null}
 
-      <table style={{ marginTop: "1rem" }}>
+      <table className="materials-table">
         <thead>
           <tr>
-            <th>Ref</th>
-            <th>Role</th>
+            <th>Material</th>
+            <th>Type</th>
             <th>Status</th>
             <th>Progress</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
+          {sources.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="empty-state">
+                No materials yet — add a file or link above to get started.
+              </td>
+            </tr>
+          ) : null}
           {sources.map((row) => (
             <Fragment key={row.source_id}>
               <tr>
                 <td>{row.ref}</td>
-                <td>{row.role}</td>
+                <td>{roleLabel(row.role)}</td>
                 <td>
-                  {row.status}
-                  {row.error ? <div className="hint">{row.error}</div> : null}
+                  {sourceStatusLabel(row.status)}
+                  {row.error ? (
+                    <div className="hint">{translateError(row.error).message}</div>
+                  ) : null}
                 </td>
                 <td>
                   {isActiveSource(row) ? (
@@ -346,7 +456,7 @@ export function CorpusView() {
                         <>
                           {" "}
                           <button type="button" onClick={() => void toggleFailures(row.source_id)}>
-                            {row.failed_chunks} failed — why?
+                            {row.failed_chunks} problems — why?
                           </button>
                         </>
                       ) : (
@@ -358,7 +468,7 @@ export function CorpusView() {
                     </>
                   )}
                 </td>
-                <td>
+                <td className="action-cell">
                   {row.status === "paused" ? (
                     <button type="button" onClick={() => void setStatus(row.source_id, "resume")}>
                       Resume
@@ -370,7 +480,7 @@ export function CorpusView() {
                   )}
                   {row.failed_chunks > 0 ? (
                     <button type="button" onClick={() => void onRetryFailed(row.source_id)}>
-                      Retry failed
+                      Retry
                     </button>
                   ) : null}
                 </td>
@@ -381,7 +491,12 @@ export function CorpusView() {
                     <ul>
                       {(failures[row.source_id] ?? []).map((group) => (
                         <li key={group.error}>
-                          {group.count}× {group.error} (e.g. {group.sample_chunk_ids.join(", ")})
+                          {group.count}× {translateError(group.error).message}
+                          <details>
+                            <summary>Technical details</summary>
+                            {group.error}
+                          </details>
+                          <span className="hint"> (e.g. {group.sample_chunk_ids.join(", ")})</span>
                         </li>
                       ))}
                     </ul>
@@ -392,6 +507,10 @@ export function CorpusView() {
           ))}
         </tbody>
       </table>
+      <p className="hint">
+        When reading finishes, open <Link to="/curriculum">My course</Link> or{" "}
+        <Link to="/chat">Ask questions</Link>.
+      </p>
     </section>
   );
 }

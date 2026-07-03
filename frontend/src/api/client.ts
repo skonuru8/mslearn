@@ -1,4 +1,5 @@
 import type { ChatFrame } from "./types";
+import { getActiveProjectId, projectHeaders } from "./projectId";
 
 export class ApiError extends Error {
   status: number;
@@ -12,6 +13,9 @@ export class ApiError extends Error {
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
+  for (const [key, value] of Object.entries(projectHeaders())) {
+    headers.set(key, value);
+  }
   if (init?.body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -72,7 +76,7 @@ export async function streamChat(
 ): Promise<void> {
   const response = await fetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...projectHeaders() },
     body: JSON.stringify({ question, session_id: sessionId }),
     signal,
   });
@@ -153,6 +157,9 @@ export function uploadSource(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/corpus/upload");
+    for (const [key, value] of Object.entries(projectHeaders())) {
+      xhr.setRequestHeader(key, value);
+    }
     xhr.upload.onprogress = (event) => {
       if (onProgress && event.lengthComputable) {
         onProgress(Math.round((event.loaded / event.total) * 100));

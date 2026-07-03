@@ -2,7 +2,8 @@
   color: #1a1a1a;
   background: #f6f7f9;
   font-family: system-ui, -apple-system, sans-serif;
-  line-height: 1.5;
+  font-size: 16px;
+  line-height: 1.55;
 }
 
 * {
@@ -22,6 +23,15 @@ a:hover {
   text-decoration: underline;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .app-shell {
   max-width: 1100px;
   margin: 0 auto;
@@ -32,9 +42,35 @@ a:hover {
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
+  align-items: flex-end;
   margin: 1rem 0 1.5rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid #d8dee9;
+}
+
+.project-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  margin-right: auto;
+  width: 100%;
+}
+
+.project-switcher label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+}
+
+.inline-field {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.new-project input {
+  min-width: 12rem;
 }
 
 .app-nav a.active {
@@ -107,17 +143,25 @@ button {
 input,
 select,
 textarea {
-  padding: 0.45rem 0.55rem;
+  padding: 0.55rem 0.65rem;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
+  min-height: 44px;
 }
 
 button {
-  padding: 0.45rem 0.85rem;
+  min-height: 44px;
+  padding: 0.55rem 1rem;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: #fff;
   cursor: pointer;
+}
+
+button.danger {
+  color: #991b1b;
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
 button.primary {
@@ -324,4 +368,138 @@ td {
   padding: 0.5rem 0;
   border-bottom: 1px solid #e5e7eb;
   font-size: 0.9rem;
+}
+
+.add-material-card {
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  background: #f9fafb;
+}
+
+.add-material-card h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.tab-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tab-row button {
+  min-height: 44px;
+}
+
+.tab-row button.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.toggle-row input {
+  min-height: auto;
+  margin-top: 0.35rem;
+}
+
+.drop-zone {
+  border: 2px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  background: #fff;
+}
+
+.drop-zone.drag-over {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.browse-label {
+  display: inline-block;
+  margin-top: 0.75rem;
+  cursor: pointer;
+}
+
+.browse-label input {
+  display: none;
+}
+
+.settings-block {
+  margin: 1.25rem 0;
+}
+
+.settings-toggle {
+  min-height: 44px;
+}
+
+.settings-panel {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.technical-details {
+  margin: -0.5rem 0 1rem;
+  font-size: 0.9rem;
+}
+
+.technical-details pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.onboarding-card {
+  padding: 1.25rem;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  margin-bottom: 1rem;
+}
+
+.onboarding-steps {
+  margin: 0.75rem 0 1rem 1.25rem;
+  padding: 0;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.button-link.primary {
+  background: #2563eb;
+  color: #fff;
+}
+
+.button-link.primary:hover {
+  text-decoration: none;
+  background: #1d4ed8;
+}
+
+.materials-table {
+  margin-top: 1rem;
+}
+
+.action-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
