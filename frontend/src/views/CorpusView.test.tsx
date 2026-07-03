@@ -1,5 +1,4 @@
-import type { ReactElement } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { CorpusView } from "./CorpusView";
@@ -11,7 +10,7 @@ describe("CorpusView", () => {
     installFetchMock(
       corpusHandlers([], {
         postSource: () => ({ source_id: "s-new" }),
-        "/api/corpus/sources": (path, init) => {
+        "/api/corpus/sources": (_path, init) => {
           if (init?.method === "POST") {
             return { source_id: "s-new" };
           }
@@ -155,7 +154,7 @@ describe("CorpusView", () => {
   it("shows error banner on 422 ingest", async () => {
     installFetchMock({
       ...corpusHandlers(),
-      "/api/corpus/sources": (path, init) => {
+      "/api/corpus/sources": (_path, init) => {
         if (init?.method === "POST") {
           return {
             ok: false,

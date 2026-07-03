@@ -84,7 +84,7 @@ describe("api", () => {
         headers: expect.any(Headers),
       }),
     );
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const init = (fetchMock.mock.calls[0] as unknown[])[1] as RequestInit;
     expect((init.headers as Headers).get("X-Project-Id")).toBe("biology");
   });
 });

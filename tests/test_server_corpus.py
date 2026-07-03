@@ -21,6 +21,14 @@ class NoDelayTask:
         self.delayed.append((project_id, chunk_id))
 
 
+class NoDelaySynthesisTask:
+    def __init__(self):
+        self.delayed = []
+
+    def delay(self, project_id="default"):
+        self.delayed.append(project_id)
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     db = OpsDB(tmp_path / "ops.db")
@@ -209,6 +217,7 @@ def test_upload_over_size_cap_rejected_413(client, monkeypatch):
 
 def test_synthesize_reports_worker_online_status(client, monkeypatch):
     c, _db, _task = client
+    monkeypatch.setattr("mslearn.server.routers.corpus.synthesize_task", NoDelaySynthesisTask())
     monkeypatch.setattr("mslearn.server.routers.corpus.worker_online", lambda: True)
     r = c.post("/api/corpus/synthesize")
     assert r.status_code == 200

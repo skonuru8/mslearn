@@ -26,6 +26,13 @@ def ok_body(content, cost=0.0002):
     }
 
 
+def test_missing_api_key_raises_clear_error():
+    with pytest.raises(ProviderError, match="MSL_OPENROUTER_API_KEY"):
+        OpenRouterProvider("")
+    with pytest.raises(ProviderError, match="MSL_OPENROUTER_API_KEY"):
+        OpenRouterProvider("   ")
+
+
 @respx.mock
 def test_complete_sends_auth_and_returns_cost():
     route = respx.post(URL).respond(json=ok_body("hello"))

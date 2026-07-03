@@ -27,10 +27,16 @@ class OpenRouterProvider(ModelProvider):
     name = "openrouter"
 
     def __init__(self, api_key: str, timeout: float = 300.0):
+        key = (api_key or "").strip()
+        if not key:
+            raise ProviderError(
+                "OpenRouter API key missing — set MSL_OPENROUTER_API_KEY in .env "
+                "(cp .env.example .env) or switch to the offline profile in Advanced"
+            )
         self._client = httpx.Client(
             base_url=_BASE,
             timeout=timeout,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {key}"},
         )
 
     def _body(self, model: str, request: ModelRequest, stream: bool) -> dict:

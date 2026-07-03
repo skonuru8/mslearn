@@ -1,5 +1,5 @@
 import type { ChatFrame } from "./types";
-import { getActiveProjectId, projectHeaders } from "./projectId";
+import { projectHeaders } from "./projectId";
 
 export class ApiError extends Error {
   status: number;

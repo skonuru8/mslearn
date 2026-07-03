@@ -34,6 +34,11 @@ export function translateError(detail: string): { message: string; technical: st
       message: "We couldn't open that file or link.",
     },
     {
+      match: /Illegal header value b'Bearer '|OpenRouter API key missing/i,
+      message:
+        "The OpenRouter API key is missing. Copy .env.example to .env, add your key, and restart the worker.",
+    },
+    {
       match: /worker offline|nothing will process/i,
       message: "The background worker isn't running, so nothing will process yet.",
     },
