@@ -61,9 +61,6 @@ class TensionGolden:
         validate_classification(self.classification)
 
 
-T = TypeVar("T")
-
-
 def _golden_path(kind: str) -> Path:
     if kind not in GOLDEN_KINDS:
         raise KeyError(f"unknown golden kind {kind!r}")
