@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import OrderedDict
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -16,13 +15,9 @@ from mslearn.server.deps import get_ctx, get_project_id
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 _CLAIM_RE = re.compile(r"\[claim:([^\]\s]+)\]")
-# Process-local, in-memory, LRU-capped: fine for a single uvicorn worker
-# (this deployment's assumption); breaks session continuity across
-# `uvicorn --workers N` or multiple app processes. Move to OpsDB if that
-# ever changes.
-_SESSIONS: "OrderedDict[str, list[dict[str, str]]]" = OrderedDict()
+# Turns persist in OpsDB (chat_turns, project-scoped). _MAX_TURNS bounds how
+# much history is replayed into the model's context window per request.
 _MAX_TURNS = 10
-_MAX_SESSIONS = 500
 
 
 class ChatRequest(BaseModel):
@@ -36,10 +31,9 @@ def chat(
     ctx=Depends(get_ctx),
     project_id: str = Depends(get_project_id),
 ):
-    session_key = f"{project_id}:{body.session_id}"
     retrieval = retrieve(ctx, body.question, project_id=project_id)
     request = ModelRequest(
-        messages=_messages(ctx, session_key, body.question, retrieval, project_id),
+        messages=_messages(ctx, body.session_id, body.question, retrieval, project_id),
         max_tokens=int(ctx.db.get_tunable("chat.max_tokens")),
     )
 
@@ -56,16 +50,23 @@ def chat(
         answer = "".join(answer_parts)
         citations = _claim_ids(answer)
         yield _sse({"done": True, "citations": citations})
-        _append_turn(session_key, body.question, answer)
+        ctx.db.append_chat_turn(project_id, body.session_id, body.question, answer)
         _record_interaction(ctx.memory, body.question, project_id)
 
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
 @router.get("/sessions/{session_id}")
-def session(session_id: str, project_id: str = Depends(get_project_id)):
-    session_key = f"{project_id}:{session_id}"
-    return {"session_id": session_id, "turns": list(_SESSIONS.get(session_key, []))}
+def session(
+    session_id: str,
+    ctx=Depends(get_ctx),
+    project_id: str = Depends(get_project_id),
+):
+    turns = ctx.db.chat_turns(project_id, session_id, limit=_MAX_TURNS)
+    return {
+        "session_id": session_id,
+        "turns": [{"question": t["question"], "answer": t["answer"]} for t in turns],
+    }
 
 
 def _messages(
@@ -83,9 +84,7 @@ def _messages(
             ),
         )
     ]
-    if session_id in _SESSIONS:
-        _SESSIONS.move_to_end(session_id)
-    for turn in _SESSIONS.get(session_id, [])[-_MAX_TURNS:]:
+    for turn in ctx.db.chat_turns(project_id, session_id, limit=_MAX_TURNS):
         messages.append(ModelMessage(role="user", content=turn["question"]))
         messages.append(ModelMessage(role="assistant", content=turn["answer"]))
     messages.append(ModelMessage(role="user", content=question))
@@ -157,15 +156,6 @@ def _claim_ids(answer: str) -> list[str]:
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
-
-
-def _append_turn(session_id: str, question: str, answer: str) -> None:
-    turns = _SESSIONS.setdefault(session_id, [])
-    turns.append({"question": question, "answer": answer})
-    del turns[:-_MAX_TURNS]
-    _SESSIONS.move_to_end(session_id)
-    while len(_SESSIONS) > _MAX_SESSIONS:
-        _SESSIONS.popitem(last=False)  # evict least-recently-used session
 
 
 def _record_interaction(memory, question: str, project_id: str) -> None:

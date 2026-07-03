@@ -88,6 +88,16 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL,
     created_ts REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session
+    ON chat_turns (project_id, session_id, id);
 """
 
 DEFAULT_PROJECT_ID = "default"
@@ -278,6 +288,9 @@ class OpsDB:
             )
             self.conn.execute(
                 "DELETE FROM settings WHERE key LIKE ?", (f"project:{project_id}:%",)
+            )
+            self.conn.execute(
+                "DELETE FROM chat_turns WHERE project_id = ?", (project_id,)
             )
             self.conn.execute(
                 "DELETE FROM projects WHERE project_id = ?", (project_id,)
@@ -638,6 +651,27 @@ class OpsDB:
                 "SELECT * FROM evolution_runs ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def append_chat_turn(
+        self, project_id: str, session_id: str, question: str, answer: str
+    ) -> None:
+        """Persist a chat turn so history survives an API restart."""
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO chat_turns (ts, project_id, session_id, question, answer)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (time.time(), project_id, session_id, question, answer),
+            )
+
+    def chat_turns(self, project_id: str, session_id: str, limit: int = 10) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT question, answer, ts FROM chat_turns"
+                " WHERE project_id = ? AND session_id = ?"
+                " ORDER BY id DESC LIMIT ?",
+                (project_id, session_id, limit),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
 
 
 def _quiz_aggregate(concept_id: str, rows: list[dict]) -> dict:

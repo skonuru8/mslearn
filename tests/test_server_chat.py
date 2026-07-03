@@ -157,24 +157,58 @@ def test_chat_session_endpoint_returns_last_ten_turns(tmp_path):
     assert turns[-1]["answer"] == "ok"
 
 
-def test_sessions_are_lru_capped(tmp_path, monkeypatch):
-    from mslearn.server.routers import chat as chat_module
-
-    monkeypatch.setattr(chat_module, "_SESSIONS", chat_module.OrderedDict())
-    monkeypatch.setattr(chat_module, "_MAX_SESSIONS", 2)
-    router = ScriptedRouter(embeddings=[[1.0, 0.0] for _ in range(3)], stream_chunks=["ok"])
+def test_chat_history_survives_a_new_opsdb_handle(tmp_path):
+    # Turns are persisted to OpsDB (chat_turns table), not kept only in a
+    # process-local dict — a fresh OpsDB handle on the same file (standing
+    # in for an API restart) must still see them.
+    router = ScriptedRouter(embeddings=[[1.0, 0.0]], stream_chunks=["ok"])
     ctx = make_chat_ctx(tmp_path, router)
     app = create_app(context=ctx)
 
     with TestClient(app) as client:
-        for session_id in ("s1", "s2", "s3"):
-            response = client.post(
-                "/api/chat", json={"question": "q", "session_id": session_id}
-            )
-            assert response.status_code == 200
+        response = client.post(
+            "/api/chat", json={"question": "What is a TTL?", "session_id": "s-restart"}
+        )
+        assert response.status_code == 200
 
-    # s1 was least-recently-used once s3 pushed the cap over 2 -> evicted.
-    assert list(chat_module._SESSIONS.keys()) == ["default:s2", "default:s3"]
+    restarted_db = OpsDB(tmp_path / "ops.db")
+    turns = restarted_db.chat_turns("default", "s-restart")
+    assert len(turns) == 1
+    assert turns[0]["question"] == "What is a TTL?"
+    assert turns[0]["answer"] == "ok"
+
+
+def test_chat_sessions_are_project_scoped(tmp_path):
+    # Same session_id used under two different projects must not leak
+    # history across the project boundary (Plan 09 Phase 3 conventions).
+    router = ScriptedRouter(embeddings=[[1.0, 0.0], [1.0, 0.0]], stream_chunks=["ok"])
+    ctx = make_chat_ctx(tmp_path, router)
+    ctx.db.create_project("other", "Other project")
+    app = create_app(context=ctx)
+
+    with TestClient(app) as client:
+        r1 = client.post(
+            "/api/chat",
+            json={"question": "default project question", "session_id": "shared-id"},
+        )
+        r2 = client.post(
+            "/api/chat",
+            headers={"X-Project-Id": "other"},
+            json={"question": "other project question", "session_id": "shared-id"},
+        )
+        assert r1.status_code == 200 and r2.status_code == 200
+
+        default_history = client.get("/api/chat/sessions/shared-id")
+        other_history = client.get(
+            "/api/chat/sessions/shared-id", headers={"X-Project-Id": "other"}
+        )
+
+    assert [t["question"] for t in default_history.json()["turns"]] == [
+        "default project question"
+    ]
+    assert [t["question"] for t in other_history.json()["turns"]] == [
+        "other project question"
+    ]
 
 
 def test_mid_stream_provider_error_emits_error_frame(tmp_path):

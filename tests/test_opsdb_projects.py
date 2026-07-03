@@ -35,12 +35,14 @@ def test_project_crud_settings_and_delete_scope(tmp_path):
     db.register_source("src-alpha", "alpha.pdf", "spine", 2, project_id="alpha")
     db.register_chunk_jobs("src-alpha", ["src-alpha:0", "src-alpha:1"], project_id="alpha")
     db.record_quiz_result("k-alpha", True, 100, project_id="alpha")
+    db.append_chat_turn("alpha", "s1", "what is x?", "x is y")
 
     assert db.project_exists("alpha")
     assert db.all_sources("alpha")[0]["source_id"] == "src-alpha"
     assert db.project_id_for_chunk("src-alpha:0") == "alpha"
     assert db.project_id_for_source("src-alpha") == "alpha"
     assert db.quiz_stats(project_id="alpha")[0]["concept_id"] == "k-alpha"
+    assert db.chat_turns("alpha", "s1")[0]["question"] == "what is x?"
 
     db.delete_project("alpha")
 
@@ -48,6 +50,7 @@ def test_project_crud_settings_and_delete_scope(tmp_path):
     assert db.all_sources("alpha") == []
     assert db.quiz_stats(project_id="alpha") == []
     assert db.get_project_setting("alpha", "corpus.domain_profile") is None
+    assert db.chat_turns("alpha", "s1") == []
 
 
 def test_default_project_cannot_be_deleted(tmp_path):
