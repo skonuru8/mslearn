@@ -1,0 +1,6 @@
+{"text_a": "Cache invalidation is difficult.", "text_b": "Invalidating caches is hard.", "same_concept": true, "review": "approved"}
+{"text_a": "Cache invalidation is difficult.", "text_b": "Bananas ripen faster in heat.", "same_concept": false, "review": "approved"}
+{"text_a": "TTLs expire stale cache entries.", "text_b": "Time-to-live bounds how long cached data stays fresh.", "same_concept": true, "review": "approved"}
+{"text_a": "Write-through caching persists before updating cache.", "text_b": "Write-back caching delays persistence.", "same_concept": false, "review": "approved"}
+{"text_a": "Eventual consistency allows temporary divergence.", "text_b": "Strong consistency forbids stale reads.", "same_concept": false, "review": "approved"}
+{"text_a": "Jitter reduces thundering herds on expiry.", "text_b": "Randomized expiry spreads reload spikes.", "same_concept": true, "review": "approved"}

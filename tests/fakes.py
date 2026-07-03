@@ -97,6 +97,19 @@ class InMemoryGraphStore:
             return None
         return {k: v for k, v in row.items() if k != "embedding"}
 
+    def sample_chunks(self, limit: int = 50) -> list[dict]:
+        rows = list(self.chunks.values())[:limit]
+        return [
+            {
+                "chunk_id": row["chunk_id"],
+                "text": row["text"],
+                "kind": row.get("kind"),
+                "source_id": row["source_id"],
+                "source_type": self.sources.get(row["source_id"], {}).get("source_type", "pdf"),
+            }
+            for row in rows
+        ]
+
     def add_claim(
         self,
         claim_id: str,

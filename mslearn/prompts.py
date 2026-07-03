@@ -118,6 +118,24 @@ PROMPTS: dict[str, str] = {
         "source explicitly: \"Source X holds..., while Source Y...\"; never blend into one voice.\n"
         "- Do not cite memory hints as facts.\n"
     ),
+    "rubric_teach": (
+        "Score teaching markdown for concept {concept_name}.\n"
+        "Markdown:\n{markdown}\n"
+        "Return JSON: clarity_1_5, grounding_1_5, tension_handled (bool)."
+    ),
+    "provenance_check": (
+        "Given markdown and source claims, detect unsupported factual statements.\n"
+        "Markdown:\n{markdown}\n"
+        "Claims:\n{claims}\n"
+        "Return JSON: unsupported_fact (bool), offending_sentence (string)."
+    ),
+    "evolve_propose": (
+        "Propose up to 3 tunable or prompt changes to improve eval metrics.\n"
+        "Current metrics:\n{metrics}\n"
+        "Current tunables:\n{tunables}\n"
+        "Recent audit:\n{audit}\n"
+        "Return JSON proposals with kind, key, value/new_prompt, targets_metric, why."
+    ),
 }
 
 

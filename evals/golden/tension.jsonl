@@ -1,0 +1,6 @@
+{"claim_a": "Use aggressive TTLs in edge caches.", "claim_b": "Prefer long TTLs and explicit invalidation in edge caches.", "domain_profile": "technical", "classification": "context_dependent", "review": "approved"}
+{"claim_a": "Microservices should share one database.", "claim_b": "Each microservice should own its datastore.", "domain_profile": "technical", "classification": "genuine_debate", "review": "approved"}
+{"claim_a": "REST is always simpler than RPC.", "claim_b": "RPC can be simpler for internal service calls.", "domain_profile": "interpretive", "classification": "genuine_debate", "review": "approved"}
+{"claim_a": "Strong consistency is required for checkout.", "claim_b": "Eventual consistency is fine for checkout counters.", "domain_profile": "technical", "classification": "evidence_mismatch", "review": "approved"}
+{"claim_a": "Graph databases replace relational stores.", "claim_b": "Relational stores remain the default for transactional workloads.", "domain_profile": "interpretive", "classification": "genuine_debate", "review": "approved"}
+{"claim_a": "Always cache user profile responses for one hour.", "claim_b": "Never cache authenticated profile responses without Vary.", "domain_profile": "technical", "classification": "context_dependent", "review": "approved"}

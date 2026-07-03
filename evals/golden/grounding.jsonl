@@ -1,0 +1,6 @@
+{"chunk_text": "Cache invalidation is one of the two hard problems in computer science.", "claim_text": "Cache invalidation is difficult.", "quote": "Cache invalidation is one of the two hard problems", "valid": true, "review": "approved"}
+{"chunk_text": "Cache invalidation is one of the two hard problems in computer science.", "claim_text": "Bananas are yellow.", "quote": "Bananas are yellow in the tropics", "valid": false, "review": "approved"}
+{"chunk_text": "Use a TTL on cached entries so stale values expire automatically.", "claim_text": "TTLs expire stale cache entries.", "quote": "TTL on cached entries so stale values expire", "valid": true, "review": "approved"}
+{"chunk_text": "Use a TTL on cached entries so stale values expire automatically.", "claim_text": "TTLs never expire.", "quote": "never expire under any condition", "valid": false, "review": "approved"}
+{"chunk_text": "Write-through caching persists each write before updating the cache.", "claim_text": "Write-through persists before cache update.", "quote": "persists each write before updating the cache", "valid": true, "review": "approved"}
+{"chunk_text": "Eventual consistency allows temporary divergence between replicas.", "claim_text": "Replicas may temporarily diverge.", "quote": "temporary divergence between replicas", "valid": true, "review": "approved"}

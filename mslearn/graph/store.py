@@ -130,6 +130,15 @@ class GraphStore:
         )
         return rows[0] if rows else None
 
+    def sample_chunks(self, limit: int = 50) -> list[dict]:
+        return self.run_read(
+            "MATCH (c:Chunk)<-[:HAS_CHUNK]-(s:Source) "
+            "RETURN c.chunk_id AS chunk_id, c.text AS text, c.kind AS kind, "
+            "s.source_id AS source_id, s.source_type AS source_type "
+            "ORDER BY c.chunk_id LIMIT $limit",
+            limit=int(limit),
+        )
+
     # -- claims -----------------------------------------------------------
     def upsert_claim(self, claim, embedding: list[float]) -> None:
         """No-op if the Chunk node doesn't exist — caller must ensure it was upserted first."""

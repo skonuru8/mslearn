@@ -110,6 +110,61 @@ def cluster_new_claims(ctx) -> set[str]:
     return dirty
 
 
+def concept_match_claim_ids(ctx, anchor: dict, candidates: list[dict]) -> list[str]:
+    """Return candidate claim ids judged to match anchor (same logic as clustering)."""
+    if not candidates:
+        return []
+    prompt = get_prompt(ctx.db, "concept_match")
+    candidate_ids = {c["claim_id"] for c in candidates}
+    response = ctx.router.complete(
+        "synthesis",
+        ModelRequest(
+            messages=[
+                ModelMessage(
+                    role="user",
+                    content=_concept_match_prompt(prompt, anchor, candidates),
+                )
+            ],
+            json_schema=_CONCEPT_MATCH_SCHEMA,
+        ),
+    )
+    parsed = response.parsed if isinstance(response.parsed, dict) else {}
+    raw_matches = parsed.get("matches", [])
+    return [claim_id for claim_id in raw_matches if claim_id in candidate_ids]
+
+
+def classify_conflict_pair(
+    ctx, *, claim_a: dict, claim_b: dict, domain_profile: str
+) -> str | None:
+    """Classify tension between two claims using the conflict_scan prompt."""
+    guidance = domain_guidance(domain_profile)
+    prompt = get_prompt(ctx.db, "conflict_scan")
+    claims = [claim_a, claim_b]
+    response = ctx.router.complete(
+        "synthesis",
+        ModelRequest(
+            messages=[
+                ModelMessage(
+                    role="user",
+                    content=_conflict_scan_prompt(prompt, "eval-pair", claims, guidance),
+                )
+            ],
+            json_schema=_CONFLICT_SCAN_SCHEMA,
+        ),
+    )
+    parsed = response.parsed if isinstance(response.parsed, dict) else {}
+    for row in parsed.get("conflicts", []):
+        if not isinstance(row, dict):
+            continue
+        a = row.get("claim_a")
+        b = row.get("claim_b")
+        classification = row.get("classification")
+        if {a, b} == {claim_a["claim_id"], claim_b["claim_id"]}:
+            if classification in CONFLICT_CLASSIFICATIONS:
+                return str(classification)
+    return None
+
+
 def process_dirty_concepts(ctx) -> int:
     graph = ctx.graph
     db = ctx.db

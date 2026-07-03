@@ -9,6 +9,15 @@ ui-build:
 ui-test:
 	cd frontend && npm test
 
+eval:
+	.venv/bin/python -m mslearn.evals.run --offline
+
+eval-live:
+	.venv/bin/python -m mslearn.evals.run
+
+release-check:
+	bash scripts/release_check.sh
+
 services:
 	docker compose up -d
 

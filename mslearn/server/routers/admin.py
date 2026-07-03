@@ -55,6 +55,17 @@ def tunable_history(key: str, ctx=Depends(get_ctx)):
     return ctx.db.tunable_history(key)
 
 
+@router.post("/tunables/{key}/rollback")
+def rollback_tunable_endpoint(key: str, ctx=Depends(get_ctx)):
+    from mslearn.evals.evolve import rollback_tunable
+
+    try:
+        value = rollback_tunable(ctx.db, key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return {"key": key, "value": value}
+
+
 @router.get("/spend")
 def spend(limit: int = 100, ctx=Depends(get_ctx)):
     calls = ctx.db.recent_calls(limit=limit)

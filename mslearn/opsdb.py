@@ -57,6 +57,31 @@ CREATE TABLE IF NOT EXISTS quiz_results (
     correct INTEGER NOT NULL,
     score INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    kind TEXT NOT NULL,
+    git_sha TEXT,
+    passed INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS eval_metrics (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    metric TEXT NOT NULL,
+    value REAL NOT NULL,
+    gate REAL,
+    passed INTEGER NOT NULL,
+    FOREIGN KEY(run_id) REFERENCES eval_runs(id)
+);
+CREATE TABLE IF NOT EXISTS evolution_runs (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    proposal_json TEXT NOT NULL,
+    shadow_before_json TEXT,
+    shadow_after_json TEXT,
+    accepted INTEGER NOT NULL,
+    reason TEXT NOT NULL
+);
 """
 
 TUNABLE_DEFAULTS: dict[str, float] = {
@@ -263,6 +288,79 @@ class OpsDB:
         for row in rows:
             grouped.setdefault(row["concept_id"], []).append(row)
         return [_quiz_aggregate(cid, grouped[cid]) for cid in sorted(grouped)]
+
+    def create_eval_run(self, kind: str, git_sha: str | None, passed: bool) -> int:
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO eval_runs (ts, kind, git_sha, passed) VALUES (?, ?, ?, ?)",
+                (time.time(), kind, git_sha, 1 if passed else 0),
+            )
+            return int(cur.lastrowid)
+
+    def add_eval_metric(
+        self, run_id: int, metric: str, value: float, gate: float | None, passed: bool
+    ) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO eval_metrics (run_id, metric, value, gate, passed)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (run_id, metric, float(value), gate, 1 if passed else 0),
+            )
+
+    def latest_eval_run(self) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM eval_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def eval_metrics_for_run(self, run_id: int) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT metric, value, gate, passed FROM eval_metrics WHERE run_id = ?"
+                " ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def eval_history(self, limit: int = 20) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM eval_runs ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def create_evolution_run(
+        self,
+        *,
+        proposal_json: str,
+        shadow_before_json: str,
+        shadow_after_json: str,
+        accepted: bool,
+        reason: str,
+    ) -> int:
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO evolution_runs"
+                " (ts, proposal_json, shadow_before_json, shadow_after_json, accepted, reason)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    time.time(),
+                    proposal_json,
+                    shadow_before_json,
+                    shadow_after_json,
+                    1 if accepted else 0,
+                    reason,
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def evolution_history(self, limit: int = 20) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM evolution_runs ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def _quiz_aggregate(concept_id: str, rows: list[dict]) -> dict:

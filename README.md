@@ -106,3 +106,32 @@ Build for production (served by FastAPI from `frontend/dist`):
 Frontend tests:
 
     make ui-test               # or: cd frontend && npm test
+
+## Evals and definition of done
+
+Golden sets live in `evals/golden/*.jsonl` (review status `approved`/`corrected`
+only). Component metrics + release gates:
+
+    .venv/bin/python -m mslearn.evals.run --offline   # CI-safe metric run
+    .venv/bin/python -m mslearn.evals.run               # includes judged provenance
+    .venv/bin/python -m mslearn.evals.evolve_cli --once # eval-gated self-evolution
+
+API: `GET /api/evals/report`, `GET /api/evals/history`, golden review queue at
+`GET /api/evals/golden/{kind}`, `POST /api/evals/evolve`, tunable rollback at
+`POST /api/admin/tunables/{key}/rollback`.
+
+Release gates (spec §6): extraction P/R ≥ 0.90/0.85, grounding false-accept ≤ 2%,
+clustering F1 ≥ 0.80, tension accuracy ≥ 0.75, schema validity ≥ 0.99,
+provenance violations = 0.
+
+Full harness:
+
+    bash scripts/release_check.sh
+
+Spec verification mapping:
+1. `make services && make serve` + `cd frontend && npm run dev` — stack up
+2. `python scripts/make_smoke_corpus.py` then ingest smoke corpus via UI/API
+3. Profile switch + Q&A/quiz/memory — manual via UI
+4. `make check` — offline pytest (225+ tests)
+5. `python -m mslearn.evals.run` — release gates (live backends for judged paths)
+6. Worker kill/resume — manual resilience check
