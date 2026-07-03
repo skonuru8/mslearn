@@ -1,4 +1,5 @@
 import pytest
+import respx
 
 from mslearn.opsdb import OpsDB
 from mslearn.profiles import load_profiles, set_active_profile_name
@@ -152,3 +153,38 @@ def test_stream_non_taxonomy_exception_not_logged_as_ok(env):
         list(router.stream("interactive", request()))
     calls = db.recent_calls()
     assert calls[0]["outcome"] == "error" and "rogue" in calls[0]["error"]
+
+
+def test_construction_never_raises_with_empty_openrouter_key(tmp_path):
+    # OpenRouterProvider.__init__ raises when the key is empty. Providers
+    # must be built lazily (on first use per name), not eagerly in
+    # ModelRouter.__init__ — otherwise the app can never boot keyless, even
+    # on the `offline` profile which never touches openrouter at all.
+    cfg = load_profiles("profiles.yaml")
+    db = OpsDB(tmp_path / "ops.db")
+    settings = Settings(_env_file=None, openrouter_api_key="")
+    router = ModelRouter(cfg, db, settings)  # must not raise
+    assert router._providers == {}
+
+
+@respx.mock
+def test_offline_profile_works_end_to_end_with_empty_openrouter_key(tmp_path):
+    cfg = load_profiles("profiles.yaml")
+    db = OpsDB(tmp_path / "ops.db")
+    set_active_profile_name(db, cfg, "offline")
+    settings = Settings(_env_file=None, openrouter_api_key="", ollama_base_url="http://ollama.test")
+    router = ModelRouter(cfg, db, settings)
+
+    respx.post("http://ollama.test/api/chat").respond(
+        json={"message": {"content": "hi"}, "prompt_eval_count": 1, "eval_count": 1}
+    )
+    respx.post("http://ollama.test/api/embed").respond(
+        json={"embeddings": [[0.1, 0.2]]}
+    )
+
+    resp = router.complete("extraction", request())
+    assert resp.provider == "ollama" and resp.text == "hi"
+    vecs = router.embed(["x"])
+    assert vecs == [[0.1, 0.2]]
+    # openrouter was never constructed — the lazy factory for it never ran.
+    assert "openrouter" not in router._providers

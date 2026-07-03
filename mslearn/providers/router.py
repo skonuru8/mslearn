@@ -1,6 +1,6 @@
 import time
 from dataclasses import replace
-from typing import Iterator
+from typing import Callable, Iterator
 
 from mslearn.opsdb import OpsDB
 from mslearn.profiles import ProfilesConfig, RoleConfig, get_active_profile_name
@@ -21,16 +21,28 @@ class ModelRouter:
     ):
         self._cfg = cfg
         self._db = db
-        self._providers: dict[str, ModelProvider] = providers or {
-            "ollama": OllamaProvider(settings.ollama_base_url),
-            "openrouter": OpenRouterProvider(settings.openrouter_api_key),
-            "claude_code": ClaudeCodeProvider(settings.claude_binary),
+        # Providers are built lazily, on first use per name, and cached here.
+        # OpenRouterProvider.__init__ raises when the API key is empty — an
+        # eager dict literal here (the old behaviour) meant the app could
+        # never boot keyless, even on the `offline` profile which never
+        # touches openrouter at all. `providers` (tests) still fully
+        # pre-populates this dict, bypassing the factories entirely.
+        self._providers: dict[str, ModelProvider] = dict(providers) if providers else {}
+        self._factories: dict[str, Callable[[], ModelProvider]] = {
+            "ollama": lambda: OllamaProvider(settings.ollama_base_url),
+            "openrouter": lambda: OpenRouterProvider(settings.openrouter_api_key),
+            "claude_code": lambda: ClaudeCodeProvider(settings.claude_binary),
         }
+
+    def _provider(self, name: str) -> ModelProvider:
+        if name not in self._providers:
+            self._providers[name] = self._factories[name]()
+        return self._providers[name]
 
     def _resolve(self, role: str) -> tuple[ModelProvider, RoleConfig]:
         profile = self._cfg.profiles[get_active_profile_name(self._db, self._cfg)]
         role_cfg = profile.roles[role]
-        return self._providers[role_cfg.provider], role_cfg
+        return self._provider(role_cfg.provider), role_cfg
 
     def _merged(self, request: ModelRequest, role_cfg: RoleConfig) -> ModelRequest:
         if not role_cfg.params:
