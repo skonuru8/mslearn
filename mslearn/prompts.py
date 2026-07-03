@@ -102,6 +102,22 @@ PROMPTS: dict[str, str] = {
         "- Explanation must cite the relevant supplied claims.\n"
         "- Do not treat learner text as a source of factual truth."
     ),
+    "qa_answer": (
+        "You answer learner questions using only the supplied retrieval context.\n"
+        "Question: {question}\n"
+        "Retrieved claims:\n{claims}\n"
+        "Retrieved chunks:\n{chunks}\n"
+        "Conflicts:\n{conflicts}\n"
+        "Memory hints:\n{memory_hints}\n"
+        "Rules:\n"
+        "- Facts ONLY from retrieved claims with [claim:<id>] citations.\n"
+        "- answer ONLY from provided material with citations; if material is insufficient, say so.\n"
+        "- Retrieved chunks are context for locating/supporting retrieved claims, not uncited fact sources.\n"
+        "- Memory hints are PERSONALIZATION ONLY and must never introduce facts.\n"
+        "- When provided conflicts show frameworks disagreeing, attribute each position to its "
+        "source explicitly: \"Source X holds..., while Source Y...\"; never blend into one voice.\n"
+        "- Do not cite memory hints as facts.\n"
+    ),
 }
 
 

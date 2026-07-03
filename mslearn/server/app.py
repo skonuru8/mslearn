@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from mslearn.providers.base import ProviderBadOutputError
-from mslearn.server.routers import admin, corpus, study
+from mslearn.server.routers import admin, chat, corpus, study
 from mslearn.worker.context import PipelineContext, build_default_context, set_context
 
 
@@ -32,6 +32,7 @@ def create_app(context: PipelineContext | None = None) -> FastAPI:
         return JSONResponse(status_code=502, content={"detail": str(exc)})
 
     app.include_router(admin.router)
+    app.include_router(chat.router)
     app.include_router(corpus.router)
     app.include_router(study.router)
     app.include_router(study.quiz_router)

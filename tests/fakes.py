@@ -4,8 +4,44 @@ import math
 import time
 import uuid
 
+from mslearn.providers.base import ModelResponse
 from mslearn.graph.records import ConceptRecord, validate_classification
 from mslearn.memory.base import MemoryItem
+
+
+class ScriptedRouter:
+    def __init__(self, outputs=None, *, embeddings=None, stream_chunks=None):
+        self.outputs = list(outputs or [])
+        self.embeddings = list(embeddings or [])
+        self.stream_chunks = list(stream_chunks or [])
+        self.calls = []
+        self.requests = []
+        self.embed_texts = []
+
+    def complete(self, role, request):
+        self.calls.append(role)
+        self.requests.append(request)
+        out = self.outputs.pop(0)
+        return ModelResponse(
+            text=out if isinstance(out, str) else "",
+            parsed=out if isinstance(out, dict) else None,
+            input_tokens=1,
+            output_tokens=1,
+            latency_ms=1.0,
+            provider="fake",
+            model="m",
+        )
+
+    def stream(self, role, request):
+        self.calls.append(role)
+        self.requests.append(request)
+        yield from self.stream_chunks
+
+    def embed(self, texts):
+        self.embed_texts.extend(texts)
+        if self.embeddings:
+            return [self.embeddings.pop(0) for _ in texts]
+        return [[1.0, 0.0] for _ in texts]
 
 
 class InMemoryGraphStore:
@@ -294,6 +330,18 @@ class InMemoryGraphStore:
                 row["embedding"] = list(claim["embedding"])
             rows.append(row)
         rows.sort(key=lambda r: (-r["score"], r["claim_id"]))
+        return rows[:k]
+
+    def vector_search_chunks(
+        self, embedding: list[float], k: int, include_embedding: bool = False
+    ) -> list[dict]:
+        rows = []
+        for chunk in self.chunks.values():
+            score = _cosine(embedding, chunk.get("embedding", [0.0] * len(embedding)))
+            row = {k: v for k, v in chunk.items() if include_embedding or k != "embedding"}
+            row["score"] = score
+            rows.append(row)
+        rows.sort(key=lambda r: (-r["score"], r["chunk_id"]))
         return rows[:k]
 
 
