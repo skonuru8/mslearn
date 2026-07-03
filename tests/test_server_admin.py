@@ -124,4 +124,4 @@ def test_spend_aggregates_roles_and_cost(client):
     assert body["total_calls"] == 3
     assert body["total_cost_usd"] == pytest.approx(0.03)
     assert body["by_role"] == {"extraction": 1, "synthesis": 2}
-    assert len(body["calls"]) == 3
+    assert len(body["recent_calls"]) == 3

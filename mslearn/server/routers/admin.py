@@ -63,7 +63,7 @@ def spend(limit: int = 100, ctx=Depends(get_ctx)):
     for call in calls:
         by_role[call["role"]] = by_role.get(call["role"], 0) + 1
     return {
-        "calls": calls,
+        "recent_calls": calls,
         "total_cost_usd": total_cost_usd,
         "total_calls": len(calls),
         "by_role": by_role,
