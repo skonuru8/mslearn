@@ -87,6 +87,7 @@ def test_generate_teaching_caches_after_first_call(tmp_path):
     assert first == second == good_markdown()
     assert router.calls == ["synthesis"]
     assert ctx.graph.get_concept("k1")["teach_md"] == good_markdown()
+    assert router.requests[0].max_tokens == int(ctx.db.get_tunable("teach.max_tokens"))
 
 
 def test_generate_teaching_force_regenerates_cached_teaching(tmp_path):

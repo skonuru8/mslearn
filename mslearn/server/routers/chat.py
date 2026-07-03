@@ -40,6 +40,7 @@ def chat(
     retrieval = retrieve(ctx, body.question, project_id=project_id)
     request = ModelRequest(
         messages=_messages(ctx, session_key, body.question, retrieval, project_id),
+        max_tokens=int(ctx.db.get_tunable("chat.max_tokens")),
     )
 
     def events():

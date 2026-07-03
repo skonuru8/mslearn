@@ -105,6 +105,56 @@ def test_empty_choices_raises_bad_output():
 
 
 @respx.mock
+def test_null_content_with_finish_reason_length_raises_budget_hint():
+    # Reasoning models (deepseek-v4-flash) can spend the entire completion
+    # budget on hidden reasoning and return content: null. json.loads(None)
+    # must never be reached — this must always surface as a clear
+    # ProviderBadOutputError, not an uncaught TypeError / raw 500.
+    body = {
+        "choices": [{"message": {"content": None}, "finish_reason": "length"}],
+        "usage": {},
+    }
+    respx.post(URL).respond(json=body)
+    with pytest.raises(ProviderBadOutputError, match="reasoning"):
+        OpenRouterProvider("k").complete("m", req())
+
+
+@respx.mock
+def test_null_content_without_length_finish_reason_still_raises():
+    body = {
+        "choices": [{"message": {"content": None}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+    respx.post(URL).respond(json=body)
+    with pytest.raises(ProviderBadOutputError):
+        OpenRouterProvider("k").complete("m", req())
+
+
+@respx.mock
+def test_empty_string_content_raises_bad_output_not_typeerror():
+    body = {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}], "usage": {}}
+    respx.post(URL).respond(json=body)
+    with pytest.raises(ProviderBadOutputError):
+        OpenRouterProvider("k").complete("m", req({"type": "object"}))
+
+
+@respx.mock
+def test_stream_with_only_reasoning_deltas_raises_bad_output():
+    # A reasoning model can stream deltas that only ever populate
+    # `reasoning`, never `content` — zero content frames, chat.py has
+    # nothing to show, and the UI just looks hung. Must raise instead of
+    # silently ending the stream.
+    sse = (
+        'data: {"choices":[{"delta":{"reasoning":"thinking..."}}]}\n\n'
+        'data: {"choices":[{"delta":{"reasoning":"still thinking..."}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    respx.post(URL).respond(content=sse, headers={"content-type": "text/event-stream"})
+    with pytest.raises(ProviderBadOutputError, match="no content"):
+        list(OpenRouterProvider("k").stream("m", req()))
+
+
+@respx.mock
 def test_stream_tolerates_trailing_usage_chunk():
     sse = (
         'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'

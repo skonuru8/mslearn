@@ -50,7 +50,10 @@ def _trusted_claims(claims: list[dict]) -> list[dict]:
 def _complete_teaching(ctx, content: str) -> str:
     response = ctx.router.complete(
         "synthesis",
-        ModelRequest(messages=[ModelMessage(role="user", content=content)]),
+        ModelRequest(
+            messages=[ModelMessage(role="user", content=content)],
+            max_tokens=int(ctx.db.get_tunable("teach.max_tokens")),
+        ),
     )
     return response.text
 

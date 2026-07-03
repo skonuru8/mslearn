@@ -59,6 +59,7 @@ def cluster_new_claims(ctx, project_id: str = "default") -> set[str]:
                     )
                 ],
                 json_schema=_CONCEPT_MATCH_SCHEMA,
+                max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
             ),
         )
         parsed = response.parsed if isinstance(response.parsed, dict) else {}
@@ -123,6 +124,7 @@ def concept_match_claim_ids(ctx, anchor: dict, candidates: list[dict]) -> list[s
                 )
             ],
             json_schema=_CONCEPT_MATCH_SCHEMA,
+            max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
         ),
     )
     parsed = response.parsed if isinstance(response.parsed, dict) else {}
@@ -147,6 +149,7 @@ def classify_conflict_pair(
                 )
             ],
             json_schema=_CONFLICT_SCAN_SCHEMA,
+            max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
         ),
     )
     parsed = response.parsed if isinstance(response.parsed, dict) else {}
@@ -189,6 +192,7 @@ def process_dirty_concepts(ctx, project_id: str = "default") -> int:
                         )
                     ],
                     json_schema=_CONFLICT_SCAN_SCHEMA,
+                    max_tokens=int(db.get_tunable("synth.max_tokens")),
                 ),
             )
             parsed = response.parsed if isinstance(response.parsed, dict) else {}
@@ -230,6 +234,7 @@ def process_dirty_concepts(ctx, project_id: str = "default") -> int:
                     )
                 ],
                 json_schema=_CONCEPT_NAME_SCHEMA,
+                max_tokens=int(db.get_tunable("synth.max_tokens")),
             ),
         )
         parsed_name = name_response.parsed if isinstance(name_response.parsed, dict) else {}
@@ -272,6 +277,7 @@ def build_curriculum(ctx, project_id: str = "default") -> list[str]:
                     )
                 ],
                 json_schema=_CONCEPT_DEPS_SCHEMA,
+                max_tokens=int(db.get_tunable("synth.max_tokens")),
             ),
         )
         parsed = response.parsed if isinstance(response.parsed, dict) else {}

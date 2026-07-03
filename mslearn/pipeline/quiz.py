@@ -83,6 +83,7 @@ def generate_question(ctx, concept_id: str, session_id: str, project_id: str = "
                 )
             ],
             json_schema=_QUESTION_SCHEMA,
+            max_tokens=int(ctx.db.get_tunable("quiz.max_tokens")),
         ),
     )
     parsed = _require_dict(response.parsed, "quiz_question")
@@ -115,6 +116,7 @@ def grade_answer(
                 )
             ],
             json_schema=_GRADE_SCHEMA,
+            max_tokens=int(ctx.db.get_tunable("quiz.max_tokens")),
         ),
     )
     parsed = _require_dict(response.parsed, "quiz_grade")

@@ -141,6 +141,7 @@ def evolve_once(ctx) -> dict:
                     ),
                 )
             ],
+            max_tokens=int(ctx.db.get_tunable("evolve.max_tokens")),
             json_schema={
                 "type": "object",
                 "required": ["proposals"],

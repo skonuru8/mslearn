@@ -119,6 +119,7 @@ def test_chat_streams_deltas_done_citations_and_records_interaction(tmp_path):
         {"done": True, "citations": ["c1", "c2"]},
     ]
     assert router.calls == ["interactive"]
+    assert router.requests[0].max_tokens == int(ctx.db.get_tunable("chat.max_tokens"))
     prompt = "\n".join(message.content for message in router.requests[0].messages)
     assert "answer ONLY from provided material" in prompt
     assert "never blend into one voice" in prompt

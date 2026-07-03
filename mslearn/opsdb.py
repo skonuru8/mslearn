@@ -105,6 +105,16 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "monitor.min_chunks": 10.0,
     "synth.candidate_k": 8.0,
     "synth.similarity_floor": 0.75,
+    # Reasoning models (deepseek-v4-flash) can burn the whole completion
+    # budget on hidden reasoning tokens before writing any answer text —
+    # 2048 (base.py ModelRequest default) is not enough headroom. Mirrors
+    # extract.max_tokens (Plan 09); one tunable per callsite rather than a
+    # single shared value so each can be tuned independently later.
+    "synth.max_tokens": 8192.0,
+    "chat.max_tokens": 8192.0,
+    "quiz.max_tokens": 8192.0,
+    "teach.max_tokens": 8192.0,
+    "evolve.max_tokens": 8192.0,
 }
 
 

@@ -3,11 +3,14 @@ import json
 import pytest
 
 from mslearn.chunking import chunk_source
+from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.synthesis import build_curriculum, cluster_new_claims, process_dirty_concepts
 from mslearn.worker import tasks as worker_tasks
 from mslearn.worker.app import app
 from mslearn.worker.context import PipelineContext, set_context
+from tests.fakes import InMemoryGraphStore
+from tests.fakes import ScriptedRouter as CapturingRouter
 from tests.test_extraction_graph import CHUNK, GOOD, ScriptedRouter
 from tests.test_graph_claims import claim, unit_vec
 from tests.test_graph_ingest import embed_stub, make_doc
@@ -148,3 +151,34 @@ def test_end_to_end_synthesis(clean_graph, tmp_path):
     cur = clean_graph.curriculum()
     assert [row["concept_id"] for row in cur][:2] == ["k-cl1", "k-cl3"]
     assert db.get_project_setting("default", "synthesis:last_run") is not None
+
+
+def test_synthesis_requests_carry_configured_max_tokens(tmp_path):
+    # deepseek-v4-flash (the openrouter profile's synthesis model) is a
+    # reasoning model that can burn the default 2048-token budget on hidden
+    # reasoning before writing an answer. Every synthesis.py callsite must
+    # request the configured synth.max_tokens budget, not the base.py
+    # ModelRequest default.
+    db = OpsDB(tmp_path / "ops.db")
+    db.set_tunable("synth.max_tokens", 4096.0, reason="test")
+    graph = InMemoryGraphStore()
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name="A"))
+    graph.upsert_concept(ConceptRecord(concept_id="k2", name="B"))
+    graph.add_claim("c1", "claim one", "neutral", "s1", [1.0, 0.0])
+    graph.add_claim("c2", "claim two", "neutral", "s2", [0.9, 0.0])
+    graph.assign_claim("c1", "k1")
+    graph.assign_claim("c2", "k1")
+    graph.mark_concept_dirty("k1", True)
+
+    router = CapturingRouter(
+        outputs=[
+            {"conflicts": []},
+            {"name": "Concept A", "summary": "..."},
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+
+    process_dirty_concepts(ctx)
+
+    assert router.calls == ["synthesis", "synthesis"]
+    assert all(req.max_tokens == 4096 for req in router.requests)

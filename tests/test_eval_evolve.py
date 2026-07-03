@@ -90,6 +90,7 @@ def test_evolve_rejects_invalid_proposal(tmp_path, monkeypatch):
         summary = evolve_once(ctx)
     assert summary["accepted"] == []
     assert summary["rejected"]
+    assert router.requests[-1].max_tokens == int(db.get_tunable("evolve.max_tokens"))
 
 
 def test_direction_aware_improvement_and_regression():

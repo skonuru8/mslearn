@@ -13,6 +13,11 @@ def test_defaults_registry_exact():
         "monitor.min_chunks": 10.0,
         "synth.candidate_k": 8.0,
         "synth.similarity_floor": 0.75,
+        "synth.max_tokens": 8192.0,
+        "chat.max_tokens": 8192.0,
+        "quiz.max_tokens": 8192.0,
+        "teach.max_tokens": 8192.0,
+        "evolve.max_tokens": 8192.0,
     }
 
 

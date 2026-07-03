@@ -103,6 +103,7 @@ def test_quiz_next_generates_reasoning_question_and_caches_pending(tmp_path):
     }
     assert router.calls == ["synthesis"]
     assert router.requests[0].json_schema is not None
+    assert router.requests[0].max_tokens == int(ctx.db.get_tunable("quiz.max_tokens"))
     prompt = router.requests[0].messages[0].content
     assert "reasoning" in prompt.lower()
     assert "[claim:c1]" in prompt
@@ -148,6 +149,7 @@ def test_pending_question_is_session_scoped_and_deleted_after_grading(tmp_path):
             json={"concept_id": "k1", "answer": "answer", "session_id": "sess-a"},
         )
         assert grade.status_code == 200
+        assert router.requests[-1].max_tokens == int(ctx.db.get_tunable("quiz.max_tokens"))
 
     # Graded slot is deleted...
     assert ctx.db.get_setting("quiz:pending:sess-a:k1") is None

@@ -71,9 +71,27 @@ class OpenRouterProvider(ModelProvider):
         start = time.perf_counter()
         data = _json(self._post(self._body(model, request, stream=False)))
         try:
-            text = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            text = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderBadOutputError(f"unexpected openrouter response shape: {str(data)[:200]}") from exc
+        if not text:
+            # Reasoning models (e.g. deepseek-v4-flash) can spend the entire
+            # completion budget on hidden reasoning tokens, leaving
+            # choices[0].message.content == null. json.loads(None) raises an
+            # uncaught TypeError if we let it through — always fail with a
+            # clear ProviderBadOutputError instead. Mirrors the ollama
+            # done_reason guard in providers/ollama.py.
+            finish_reason = choice.get("finish_reason")
+            if finish_reason == "length":
+                raise ProviderBadOutputError(
+                    "openrouter returned empty content (finish_reason=length);"
+                    " the model spent its completion budget on reasoning —"
+                    " raise max_tokens"
+                )
+            raise ProviderBadOutputError(
+                f"openrouter returned empty content (finish_reason={finish_reason!r})"
+            )
         parsed = None
         if request.json_schema is not None:
             try:
@@ -94,6 +112,7 @@ class OpenRouterProvider(ModelProvider):
 
     def stream(self, model: str, request: ModelRequest) -> Iterator[str]:
         body = self._body(model, request, stream=True)
+        yielded = False
         try:
             with self._client.stream("POST", "/chat/completions", json=body) as resp:
                 resp.raise_for_status()
@@ -111,6 +130,7 @@ class OpenRouterProvider(ModelProvider):
                     except (json.JSONDecodeError, KeyError, IndexError) as exc:
                         raise ProviderBadOutputError(f"malformed SSE chunk: {payload[:200]!r}") from exc
                     if delta:
+                        yielded = True
                         yield delta
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code >= 500 or exc.response.status_code == 429:
@@ -118,3 +138,10 @@ class OpenRouterProvider(ModelProvider):
             raise ProviderError(str(exc)) from exc
         except httpx.TransportError as exc:
             raise ProviderTransientError(str(exc)) from exc
+        if not yielded:
+            # A stream that only carried reasoning deltas (no `content`) ends
+            # silently otherwise — chat.py has nothing to turn into an error
+            # frame and the UI just looks hung. Fail loudly instead.
+            raise ProviderBadOutputError(
+                "stream ended with no content (reasoning budget exhausted?)"
+            )
