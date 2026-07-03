@@ -1,15 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from mslearn.pipeline.quiz import generate_question, grade_answer, next_concept, public_quiz_stats
 from mslearn.pipeline.teaching import TeachingError, generate_teaching
 from mslearn.server.deps import get_ctx
 from mslearn.worker.tasks import synthesize_task
 
 router = APIRouter(prefix="/api/study", tags=["study"])
+quiz_router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
 
 class FlagRequest(BaseModel):
     reason: str
+
+
+class QuizAnswerRequest(BaseModel):
+    concept_id: str
+    answer: str
 
 
 @router.get("/curriculum")
@@ -52,3 +59,28 @@ def flag_claim(claim_id: str, body: FlagRequest, ctx=Depends(get_ctx)):
     ctx.graph.set_concept_teaching(concept_id, "")
     synthesize_task.delay()
     return {"claim_id": claim_id, "concept_id": concept_id, "status": "flagged"}
+
+
+@quiz_router.get("/next")
+def quiz_next(ctx=Depends(get_ctx)):
+    concept_id = next_concept(ctx)
+    if concept_id is None:
+        raise HTTPException(status_code=404, detail="no quiz concepts available")
+    try:
+        question = generate_question(ctx, concept_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return {"concept_id": concept_id, "question": question["question"]}
+
+
+@quiz_router.post("/answer")
+def quiz_answer(body: QuizAnswerRequest, ctx=Depends(get_ctx)):
+    try:
+        return grade_answer(ctx, body.concept_id, body.answer)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+
+
+@quiz_router.get("/stats")
+def quiz_stats(ctx=Depends(get_ctx)):
+    return public_quiz_stats(ctx)

@@ -79,16 +79,28 @@ PROMPTS: dict[str, str] = {
         "- Do not cite memory hints as facts.\n"
     ),
     "quiz_question": (
-        "Write one quiz question for a concept using only cited claims.\n"
+        "Write one reasoning quiz question for a concept using only cited claims.\n"
+        "Concept: {concept_name}\n"
+        "Summary: {concept_summary}\n"
+        "Claims:\n{claims}\n"
         "Return JSON only matching schema: "
-        "{\"question\": \"...\", \"answer\": \"...\", \"claim_ids\": [\"...\"]}.\n"
-        "Rules: every factual premise must be supported by listed claim_ids."
+        "{{\"question\": \"...\", \"expected_points\": [\"...\"]}}.\n"
+        "Rules:\n"
+        "- Ask for reasoning or application, not recall.\n"
+        "- Each expected point must cite supporting claim ids like [claim:<id>].\n"
+        "- Every factual premise must be supported by the supplied cited claims."
     ),
     "quiz_grade": (
-        "Grade a learner answer against the expected answer and cited claims.\n"
+        "Grade a learner answer against the expected points and cited claims.\n"
+        "Question: {question}\n"
+        "Expected points:\n{expected_points}\n"
+        "Learner answer:\n{answer}\n"
         "Return JSON only matching schema: "
-        "{\"correct\": true, \"feedback\": \"...\", \"claim_ids\": [\"...\"]}.\n"
-        "Rules: feedback facts must come only from cited claims."
+        "{{\"correct\": true, \"score_0_100\": 0, \"explanation\": \"...\"}}.\n"
+        "Rules:\n"
+        "- Decide whether the answer substantially covers the expected points.\n"
+        "- Explanation must cite the relevant supplied claims.\n"
+        "- Do not treat learner text as a source of factual truth."
     ),
 }
 

@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS chunk_jobs (
     attempts INTEGER NOT NULL DEFAULT 0,
     error TEXT
 );
+CREATE TABLE IF NOT EXISTS quiz_results (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    concept_id TEXT NOT NULL,
+    correct INTEGER NOT NULL,
+    score INTEGER NOT NULL
+);
 """
 
 TUNABLE_DEFAULTS: dict[str, float] = {
@@ -231,3 +238,44 @@ class OpsDB:
                 (source_id,),
             ).fetchone()
         return {"total": row["total"], "failed": row["failed"] or 0}
+
+    def record_quiz_result(self, concept_id: str, correct: bool, score: int) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO quiz_results (ts, concept_id, correct, score) VALUES (?, ?, ?, ?)",
+                (time.time(), concept_id, 1 if correct else 0, int(score)),
+            )
+
+    def quiz_stats(self, concept_id: str | None = None):
+        query = "SELECT * FROM quiz_results"
+        params: tuple[str, ...] = ()
+        if concept_id is not None:
+            query += " WHERE concept_id = ?"
+            params = (concept_id,)
+        query += " ORDER BY concept_id, id"
+        with self._lock:
+            rows = [dict(row) for row in self.conn.execute(query, params).fetchall()]
+
+        if concept_id is not None:
+            return _quiz_aggregate(concept_id, rows)
+
+        grouped: dict[str, list[dict]] = {}
+        for row in rows:
+            grouped.setdefault(row["concept_id"], []).append(row)
+        return [_quiz_aggregate(cid, grouped[cid]) for cid in sorted(grouped)]
+
+
+def _quiz_aggregate(concept_id: str, rows: list[dict]) -> dict:
+    attempts = len(rows)
+    correct = sum(1 for row in rows if bool(row["correct"]))
+    last = rows[-1] if rows else None
+    return {
+        "concept_id": concept_id,
+        "attempts": attempts,
+        "correct": correct,
+        "incorrect": attempts - correct,
+        "avg_score": (sum(row["score"] for row in rows) / attempts) if attempts else 0.0,
+        "last_score": last["score"] if last else None,
+        "last_correct": bool(last["correct"]) if last else None,
+        "last_ts": last["ts"] if last else None,
+    }
