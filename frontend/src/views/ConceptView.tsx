@@ -10,6 +10,7 @@ export function ConceptView() {
   const { id = "" } = useParams();
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [markdown, setMarkdown] = useState("");
+  const [cached, setCached] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,6 +29,7 @@ export function ConceptView() {
       }
       setDetail(conceptDetail);
       setMarkdown(teach.markdown);
+      setCached(Boolean(teach.cached));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load concept");
@@ -39,6 +41,7 @@ export function ConceptView() {
   useEffect(() => {
     setDetail(null);
     setMarkdown("");
+    setCached(false);
     void load();
   }, [load]);
 
@@ -61,7 +64,7 @@ export function ConceptView() {
 
   if (!detail) {
     if (loading) {
-      return <Loading />;
+      return <Loading label="Writing your lesson… (first time can take a minute or two)" />;
     }
     return (
       <section className="panel">
@@ -81,17 +84,24 @@ export function ConceptView() {
       <h1>{detail.concept.name}</h1>
       <p>{detail.concept.summary}</p>
       <ErrorBanner message={error} />
-      <button type="button" onClick={() => void load(true)}>
+      <button type="button" onClick={() => void load(true)} disabled={loading}>
         Regenerate teaching
       </button>
 
       <h2>Teaching</h2>
-      <MarkdownWithCitations text={main} citations={detail.citations} />
-      {tension ? (
-        <div className="tension">
-          <MarkdownWithCitations text={tension} citations={detail.citations} />
-        </div>
-      ) : null}
+      {loading ? (
+        <Loading label="Writing your lesson… (first time can take a minute or two)" />
+      ) : (
+        <>
+          {cached ? <p className="cached-badge">Loaded instantly from the saved lesson.</p> : null}
+          <MarkdownWithCitations text={main} citations={detail.citations} />
+          {tension ? (
+            <div className="tension">
+              <MarkdownWithCitations text={tension} citations={detail.citations} />
+            </div>
+          ) : null}
+        </>
+      )}
 
       <h2>Claims</h2>
       {detail.claims.map((claim) => (

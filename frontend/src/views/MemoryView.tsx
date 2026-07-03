@@ -8,6 +8,7 @@ export function MemoryView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -15,10 +16,12 @@ export function MemoryView() {
       const response = await api<MemoryListResponse>("/api/memory");
       setItems(response.items);
       setUnavailable(false);
+      setUnavailableReason(null);
       setError(null);
     } catch (err) {
       if (err instanceof Error && "status" in err && (err as { status: number }).status === 503) {
         setUnavailable(true);
+        setUnavailableReason(err.message || null);
         setItems([]);
         setError(null);
       } else {
@@ -51,7 +54,15 @@ export function MemoryView() {
     return (
       <section className="panel">
         <h1>Memory</h1>
-        <p className="empty-state">Memory unavailable — mem0 not installed or failed to initialize.</p>
+        <p className="empty-state">
+          Personal memory is off. The app can still teach and quiz you — it just won&apos;t personalize.
+        </p>
+        {unavailableReason ? (
+          <details className="technical-details">
+            <summary>Show technical details</summary>
+            <p>{unavailableReason}</p>
+          </details>
+        ) : null}
       </section>
     );
   }

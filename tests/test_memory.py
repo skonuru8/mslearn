@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 from mslearn.memory.base import LearnerMemory, MemoryItem
 from tests.fakes import InMemoryLearnerMemory
@@ -53,3 +54,28 @@ def test_build_default_context_memory_none_when_mem0_missing(monkeypatch, tmp_pa
 
     ctx = build_default_context()
     assert ctx.memory is None
+
+
+def test_mem0_config_points_llm_at_openrouter_not_openai(tmp_path):
+    # mem0's OpenAILLM only honors `openrouter_base_url` when the
+    # OPENROUTER_API_KEY *environment variable* is set (it isn't — we pass
+    # the key through config, not the env). Without this, the "openai"
+    # provider silently falls back to https://api.openai.com/v1 and every
+    # learner-memory call fails auth using an OpenRouter key against
+    # OpenAI's real API. `openai_base_url` is the field that actually
+    # takes effect for that fallback path.
+    from mslearn.memory.mem0_impl import Mem0Memory
+    from mslearn.opsdb import OpsDB
+    from mslearn.settings import Settings
+
+    settings = Settings(
+        profiles_path=Path("profiles.yaml"),
+        openrouter_api_key="sk-or-test",
+    )
+    db = OpsDB(tmp_path / "ops.db")
+    config = Mem0Memory(settings, db)._build_config()
+
+    assert config["llm"]["provider"] == "openai"
+    assert config["llm"]["config"]["openai_base_url"] == "https://openrouter.ai/api/v1"
+    assert config["llm"]["config"]["api_key"] == "sk-or-test"
+    assert "openrouter_base_url" not in config["llm"]["config"]

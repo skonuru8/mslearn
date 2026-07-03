@@ -64,6 +64,32 @@ def test_memory_endpoint_returns_503_when_memory_unavailable(tmp_path):
     assert delete_response.status_code == 503
 
 
+class BrokenMemory:
+    """mem0 builds its client lazily on first real call — a bad config or an
+    unreachable neo4j/ollama/openrouter surfaces here, not when ctx.memory
+    is constructed. The memory endpoints must turn that into the same
+    honest 503 the UI already handles, not an unhandled 500."""
+
+    def all(self, project_id: str = "default"):
+        raise RuntimeError("neo4j connection refused")
+
+    def delete(self, memory_id: str) -> None:
+        raise RuntimeError("neo4j connection refused")
+
+
+def test_memory_endpoint_returns_503_with_reason_when_client_init_fails(tmp_path):
+    app = create_app(context=make_ctx(tmp_path, memory=BrokenMemory()))
+
+    with TestClient(app) as client:
+        list_response = client.get("/api/memory")
+        delete_response = client.delete("/api/memory/missing")
+
+    assert list_response.status_code == 503
+    assert "neo4j connection refused" in list_response.json()["detail"]
+    assert delete_response.status_code == 503
+    assert "neo4j connection refused" in delete_response.json()["detail"]
+
+
 def test_static_dist_absent_does_not_shadow_api(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     app = create_app(context=make_ctx(tmp_path, memory=None))

@@ -142,6 +142,7 @@ export interface ConceptDetail {
 
 export interface TeachResponse {
   markdown: string;
+  cached?: boolean;
 }
 
 export interface QuizNext {

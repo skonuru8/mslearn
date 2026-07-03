@@ -55,7 +55,15 @@ class Mem0Memory:
                 "config": {
                     "model": llm_model,
                     "api_key": self._settings.openrouter_api_key,
-                    "openrouter_base_url": "https://openrouter.ai/api/v1",
+                    # mem0's OpenAILLM only honors `openrouter_base_url` when
+                    # the OPENROUTER_API_KEY *environment variable* is set
+                    # (mem0/llms/openai.py); we pass the key through config
+                    # instead, so `openai_base_url` is the field that
+                    # actually takes effect — using `openrouter_base_url`
+                    # here silently fell through to OpenAI's real API with
+                    # an OpenRouter key, guaranteeing an auth failure on
+                    # every learner-memory call.
+                    "openai_base_url": "https://openrouter.ai/api/v1",
                 },
             },
         }

@@ -52,13 +52,19 @@ def teach(
     ctx=Depends(get_ctx),
     project_id: str = Depends(get_project_id),
 ):
-    if ctx.graph.get_concept(concept_id, project_id=project_id) is None:
+    concept = ctx.graph.get_concept(concept_id, project_id=project_id)
+    if concept is None:
         raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
+    # Same condition generate_teaching uses internally to decide whether to
+    # skip the (slow, first-time-can-take-a-minute) LLM call — computed here
+    # too so the response can tell the UI whether this was a cache hit,
+    # without changing generate_teaching's own return contract.
+    cached = bool(concept.get("teach_md")) and not force and not concept.get("dirty", False)
     try:
         markdown = generate_teaching(ctx, concept_id, force=force, project_id=project_id)
     except TeachingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
-    return {"markdown": markdown}
+    return {"markdown": markdown, "cached": cached}
 
 
 @router.post("/claims/{claim_id}/flag")

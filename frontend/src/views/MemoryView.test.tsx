@@ -24,18 +24,23 @@ describe("MemoryView", () => {
     });
   });
 
-  it("renders unavailable state on 503", async () => {
+  it("renders plain-language unavailable state on 503 with a technical details disclosure", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
         ok: false,
         status: 503,
         statusText: "Service Unavailable",
-        json: async () => ({ detail: "learner memory unavailable" }),
+        json: async () => ({ detail: "learner memory unavailable: neo4j connection refused" }),
       })),
     );
 
     render(<MemoryView />);
-    await screen.findByText(/Memory unavailable/i);
+    await screen.findByText(/Personal memory is off/i);
+    expect(screen.queryByText(/won't personalize/i)).toBeInTheDocument();
+
+    const details = screen.getByText("Show technical details");
+    await userEvent.click(details);
+    await screen.findByText(/neo4j connection refused/i);
   });
 });
