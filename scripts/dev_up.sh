@@ -64,6 +64,15 @@ echo "== starting Celery worker =="
 .venv/bin/celery -A mslearn.worker.app worker -Q ingest,judge --concurrency=2 -l warning &
 WORKER_PID=$!
 
+DIST_INDEX="frontend/dist/index.html"
+if [ ! -f "$DIST_INDEX" ]; then
+  echo "== rebuilding frontend: frontend/dist is missing =="
+  npm --prefix frontend run build
+elif [ -n "$(find frontend/src -type f -newer "$DIST_INDEX" -print -quit)" ]; then
+  echo "== rebuilding frontend: frontend/src has changes newer than the built dist bundle =="
+  npm --prefix frontend run build
+fi
+
 echo "== starting API (uvicorn) =="
 .venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000 \
   --log-level warning --no-access-log &

@@ -1,10 +1,13 @@
 import pytest
 
+from mslearn.adapters.base import make_source_id
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.contracts import derive_claim_id
+from mslearn.providers.base import ProviderTransientError
 from mslearn.worker import tasks as worker_tasks
 from mslearn.worker.app import app
 from mslearn.worker.context import PipelineContext, set_context
+from tests.fakes import InMemoryGraphStore
 from tests.test_extraction_graph import BAD, GOOD, CHUNK, ScriptedRouter
 
 
@@ -153,6 +156,126 @@ def test_chunk_failure_logs_one_warning_line(ctx, caplog):
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert any("s1:0" in r.getMessage() and "failed" in r.getMessage() for r in warnings)
     assert context.db.failure_stats("s1")["failed"] == 1
+
+
+class EmbedFlaky:
+    """Router whose embed() fails transiently `fail_times` calls before succeeding."""
+
+    def __init__(self, fail_times: int):
+        self.fail_times = fail_times
+        self.calls = 0
+
+    def embed(self, texts):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise ProviderTransientError("embedding blip")
+        return [[1.0, 0.0] for _ in texts]
+
+    def complete(self, role, request):
+        raise AssertionError("chunk_source_task must not call complete()")
+
+
+def test_chunk_source_task_success_flips_to_running_and_enqueues(tmp_path, tiny_pdf, monkeypatch):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    source_id = make_source_id(str(tiny_pdf))
+    db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=0)
+    db.set_source_status(source_id, "chunking")
+    set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([]), graph=graph))
+
+    scheduled = []
+    monkeypatch.setattr(
+        worker_tasks, "extract_chunk_task", type("F", (), {"delay": lambda self, *a: scheduled.append(a)})()
+    )
+
+    worker_tasks.chunk_source_task.delay("default", source_id, str(tiny_pdf), "spine", "pdf").get()
+
+    row = db.source_row(source_id)
+    assert row["status"] == "running"
+    assert row["total_chunks"] == len(scheduled) > 0
+    assert db.pending_chunks(source_id) == sorted(c for _pid, c in scheduled)
+
+
+def test_chunk_source_task_adapter_failure_marks_failed(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    bad = tmp_path / "broken.pdf"
+    bad.write_bytes(b"not a pdf")
+    source_id = make_source_id(str(bad))
+    db.register_source(source_id, ref=str(bad), role="spine", total_chunks=0)
+    db.set_source_status(source_id, "chunking")
+    set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([]), graph=graph))
+
+    worker_tasks.chunk_source_task.delay("default", source_id, str(bad), "spine", "pdf").get()
+
+    row = db.source_row(source_id)
+    assert row["status"] == "failed"
+    assert row["error"]
+
+
+def test_chunk_source_task_guard_noop_when_not_chunking(tmp_path, tiny_pdf):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    source_id = make_source_id(str(tiny_pdf))
+    db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=3)
+    db.set_source_status(source_id, "running")  # already past chunking
+    set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([]), graph=graph))
+
+    worker_tasks.chunk_source_task.delay("default", source_id, str(tiny_pdf), "spine", "pdf").get()
+
+    row = db.source_row(source_id)
+    assert row["status"] == "running"  # untouched — redelivered/duplicate task is a no-op
+    assert graph.sources == {}
+
+
+def test_chunk_source_task_guard_noop_when_source_deleted(tmp_path, tiny_pdf):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([]), graph=graph))
+
+    worker_tasks.chunk_source_task.delay("default", "gone", str(tiny_pdf), "spine", "pdf").get()
+
+    assert db.source_row("gone") is None
+    assert graph.sources == {}
+
+
+def test_chunk_source_task_transient_embed_retries_then_succeeds(tmp_path, tiny_pdf):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    source_id = make_source_id(str(tiny_pdf))
+    db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=0)
+    db.set_source_status(source_id, "chunking")
+    router = EmbedFlaky(fail_times=2)
+    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+
+    worker_tasks.chunk_source_task.delay(
+        "default", source_id, str(tiny_pdf), "spine", "pdf", False
+    ).get()
+
+    row = db.source_row(source_id)
+    assert row["status"] == "running"
+    assert row["total_chunks"] > 0
+    assert router.calls == 3
+
+
+def test_chunk_source_task_transient_embed_exhausted_marks_failed(tmp_path, tiny_pdf):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    source_id = make_source_id(str(tiny_pdf))
+    db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=0)
+    db.set_source_status(source_id, "chunking")
+    router = EmbedFlaky(fail_times=99)
+    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+
+    try:
+        worker_tasks.chunk_source_task.delay(
+            "default", source_id, str(tiny_pdf), "spine", "pdf", False
+        ).get()
+    except ProviderTransientError:
+        pass
+    row = db.source_row(source_id)
+    assert row["status"] == "failed"
+    assert graph.sources == {}  # never reached the graph upsert step
 
 
 def test_synthesis_failure_records_last_error(ctx, monkeypatch):

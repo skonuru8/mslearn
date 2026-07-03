@@ -2,6 +2,8 @@ import json
 import logging
 import time
 
+from mslearn.adapters.registry import load_source
+from mslearn.chunking import chunk_source
 from mslearn.pipeline.contracts import to_claim_record
 from mslearn.pipeline.extraction_graph import run_extraction
 from mslearn.pipeline.synthesis import (
@@ -14,6 +16,75 @@ from mslearn.worker.app import app
 from mslearn.worker.context import get_context
 
 logger = logging.getLogger(__name__)
+
+
+@app.task(
+    bind=True,
+    autoretry_for=(ProviderTransientError,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def chunk_source_task(
+    self,
+    project_id: str,
+    source_id: str,
+    ref: str,
+    role: str,
+    source_type: str | None = None,
+    enqueue: bool = True,
+):
+    """Load, chunk, embed, and graph-upsert a source, then enqueue extraction.
+
+    Split out of orchestrator.ingest_source so the create-source HTTP
+    request can return immediately: the row starts in status "chunking"
+    (total_chunks=0, rendered as "Preparing…") and this task does the slow
+    work — adapter load (which for YouTube-without-captions means a yt_dlp
+    download + whisper transcription, on the order of minutes) through
+    chunking, embedding, and the Neo4j upserts.
+
+    Guarded against redelivery/delete races: a source whose status is no
+    longer "chunking" (already processed by an earlier delivery of this
+    same task, or deleted out from under it) is a silent no-op — mirrors
+    the paused-skip guard in extract_chunk_task. register_chunk_jobs
+    (INSERT OR IGNORE) and upsert_chunks (MERGE) make a retried task safe
+    even if it re-runs after partially registering chunks.
+    """
+    ctx = get_context()
+    row = ctx.db.source_row(source_id, project_id=project_id)
+    if row is None or row["status"] != "chunking":
+        return
+
+    try:
+        doc = load_source(ref, source_type=source_type, role=role)
+    except Exception as exc:
+        ctx.db.set_source_status(source_id, "failed", error=str(exc)[:500])
+        logger.warning("source %s failed to load %s: %s", source_id, ref, str(exc)[:120])
+        return
+
+    chunks = chunk_source(doc)
+    try:
+        embeddings = ctx.router.embed([c.text for c in chunks]) if chunks else []
+    except ProviderTransientError as exc:
+        if self.request.retries >= self.max_retries:
+            ctx.db.set_source_status(
+                source_id, "failed", error=f"embedding retries exhausted: {exc}"[:500]
+            )
+            logger.warning("source %s failed: embedding retries exhausted", source_id)
+        raise
+    except Exception as exc:
+        ctx.db.set_source_status(source_id, "failed", error=str(exc)[:500])
+        logger.warning("source %s failed to embed chunks: %s", source_id, str(exc)[:120])
+        return
+
+    ctx.graph.upsert_source(doc, project_id=project_id)
+    ctx.graph.upsert_chunks(chunks, embeddings, project_id=project_id)
+    ctx.db.register_chunk_jobs(source_id, [c.chunk_id for c in chunks], project_id=project_id)
+    ctx.db.set_source_total_chunks(source_id, len(chunks))
+    ctx.db.set_source_status(source_id, "running")
+    logger.info("source registered id=%s ref=%s chunks=%d", source_id, ref, len(chunks))
+    if enqueue:
+        for chunk in chunks:
+            extract_chunk_task.delay(project_id, chunk.chunk_id)
 
 
 def _check_failure_monitor(db, source_id: str) -> None:

@@ -1,13 +1,9 @@
-import logging
 from pathlib import Path
 
-from mslearn.adapters.registry import load_source
-from mslearn.chunking import chunk_source
+from mslearn.adapters.base import make_source_id
 from mslearn.opsdb import DEFAULT_PROJECT_ID
 from mslearn.worker.context import get_context
-from mslearn.worker.tasks import extract_chunk_task
-
-logger = logging.getLogger(__name__)
+from mslearn.worker.tasks import chunk_source_task, extract_chunk_task
 
 
 class IngestError(Exception):
@@ -22,33 +18,29 @@ def ingest_source(
     enqueue: bool = True,
     project_id: str = DEFAULT_PROJECT_ID,
 ) -> str:
+    """Register a source and hand loading off to chunk_source_task.
+
+    Returns immediately: the row starts in status "chunking" with
+    total_chunks=0 (the "Preparing…" state in the UI). chunk_source_task
+    does the actual adapter load -> chunk -> embed -> graph upsert ->
+    extract-enqueue work in the background, so a slow load (e.g. YouTube
+    without captions: yt_dlp download + whisper transcription, on the
+    order of minutes) no longer blocks the HTTP request.
+
+    In eager/test mode (Celery task_always_eager — `local=true` requests,
+    ingest_cli --local, most existing tests) chunk_source_task runs inline
+    before this call returns, so callers relying on synchronous completion
+    still see the fully processed row.
+    """
     ctx = get_context()
-    try:
-        doc = load_source(ref, source_type=source_type, role=role)
-    except Exception as exc:
-        from mslearn.adapters.base import make_source_id
-
-        source_id = make_source_id(ref)
-        ctx.db.register_source(
-            source_id, ref=ref, role=role, total_chunks=0, project_id=project_id
-        )
-        ctx.db.set_source_status(source_id, "failed", error=str(exc)[:500])
-        raise IngestError(f"failed to load {ref!r}: {exc}") from exc
-
-    chunks = chunk_source(doc)
-    embeddings = ctx.router.embed([c.text for c in chunks]) if chunks else []
-    ctx.graph.upsert_source(doc, project_id=project_id)
-    ctx.graph.upsert_chunks(chunks, embeddings, project_id=project_id)
-    ctx.db.register_source(
-        doc.source_id, ref=ref, role=role, total_chunks=len(chunks), project_id=project_id
-    )
-    ctx.db.register_chunk_jobs(doc.source_id, [c.chunk_id for c in chunks], project_id=project_id)
-    ctx.db.set_source_status(doc.source_id, "running")
-    logger.info("source registered id=%s ref=%s chunks=%d", doc.source_id, ref, len(chunks))
-    if enqueue:
-        for chunk in chunks:
-            extract_chunk_task.delay(project_id, chunk.chunk_id)
-    return doc.source_id
+    source_id = make_source_id(ref)
+    ctx.db.register_source(source_id, ref=ref, role=role, total_chunks=0, project_id=project_id)
+    ctx.db.set_source_status(source_id, "chunking")
+    # `enqueue` only controls whether chunk_source_task schedules the
+    # per-chunk extract_chunk_task calls once loading/chunking finishes —
+    # loading/chunking/embedding themselves always happen in the background.
+    chunk_source_task.delay(project_id, source_id, ref, role, source_type, enqueue)
+    return source_id
 
 
 def order_corpus(refs: list[tuple[str, str]]) -> list[tuple[str, str]]:

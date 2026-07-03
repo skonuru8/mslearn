@@ -31,6 +31,13 @@ class NoDelaySynthesisTask:
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
+    # create_source now hands loading off to chunk_source_task (a Celery
+    # task); eager mode makes it — and any extract_chunk_task it in turn
+    # schedules — run inline, so these tests still see the fully-processed
+    # row immediately after the POST, same as the pre-background-ingest
+    # behaviour.
+    from mslearn.worker.app import app as celery_app
+
     db = OpsDB(tmp_path / "ops.db")
     settings = Settings(profiles_path=Path("profiles.yaml"))
     ctx = PipelineContext(
@@ -40,10 +47,40 @@ def client(tmp_path, monkeypatch):
         graph=InMemoryGraphStore(),
     )
     fake_task = NoDelayTask()
+    monkeypatch.setattr("mslearn.worker.tasks.extract_chunk_task", fake_task)
     monkeypatch.setattr("mslearn.pipeline.orchestrator.extract_chunk_task", fake_task)
+    celery_app.conf.task_always_eager = True
     app = create_app(context=ctx)
     with TestClient(app) as c:
         yield c, db, fake_task
+    celery_app.conf.task_always_eager = False
+
+
+def test_create_source_returns_immediately_with_chunking_status(tmp_path, monkeypatch, tiny_pdf):
+    # Without eager mode: the POST only does the synchronous registration
+    # (make_source_id + register_source + status "chunking") and schedules
+    # chunk_source_task — it does not wait for loading/chunking/embedding.
+    db = OpsDB(tmp_path / "ops.db")
+    ctx = PipelineContext(
+        settings=Settings(profiles_path=Path("profiles.yaml")),
+        db=db,
+        router=ScriptedRouter([]),
+        graph=InMemoryGraphStore(),
+    )
+    scheduled = []
+    monkeypatch.setattr(
+        "mslearn.pipeline.orchestrator.chunk_source_task",
+        type("F", (), {"delay": lambda self, *a: scheduled.append(a)})(),
+    )
+    app = create_app(context=ctx)
+    with TestClient(app) as c:
+        r = c.post("/api/corpus/sources", json={"ref": str(tiny_pdf), "role": "spine"})
+        assert r.status_code == 200
+        source_id = r.json()["source_id"]
+        row = db.source_row(source_id)
+        assert row["status"] == "chunking"
+        assert row["total_chunks"] == 0
+        assert scheduled == [("default", source_id, str(tiny_pdf), "spine", None, True)]
 
 
 def test_ingest_happy_path(client, tiny_pdf):
@@ -68,7 +105,12 @@ def test_ingest_happy_path(client, tiny_pdf):
     assert "failed_chunks" in sources[0]
 
 
-def test_ingest_failure_422_and_marks_failed(client, tmp_path):
+def test_ingest_failure_marks_failed_not_422(client, tmp_path):
+    # Adapter failures now happen in the background chunk_source_task, not
+    # synchronously in the request handler — the POST still succeeds (a
+    # source row is created) and the failure surfaces via source status,
+    # not an HTTP error. (The eager fixture runs chunk_source_task inline,
+    # so by the time this returns the failure has already happened.)
     c, db, _ = client
     bad = tmp_path / "broken.pdf"
     bad.write_bytes(b"not a pdf")
@@ -76,11 +118,13 @@ def test_ingest_failure_422_and_marks_failed(client, tmp_path):
         "/api/corpus/sources",
         json={"ref": str(bad), "role": "supplement"},
     )
-    assert r.status_code == 422
-    assert "failed to load" in r.json()["detail"]
+    assert r.status_code == 200
+    source_id = r.json()["source_id"]
     sources = db.all_sources()
     assert len(sources) == 1
+    assert sources[0]["source_id"] == source_id
     assert sources[0]["status"] == "failed"
+    assert sources[0]["error"]
 
 
 def test_pause_and_resume(client, tiny_pdf):
@@ -300,3 +344,47 @@ def test_delete_source_unknown_404(client):
     c, _db, _task = client
     r = c.delete("/api/corpus/sources/nope")
     assert r.status_code == 404
+
+
+def test_delete_while_chunking_prevents_resurrection(tmp_path, monkeypatch, tiny_pdf):
+    # A source can be deleted while it's still "chunking" (background load
+    # hasn't run yet). The DELETE endpoint doesn't special-case status, and
+    # chunk_source_task's own guard (status != "chunking" -> no-op) must see
+    # the row gone and do nothing rather than resurrecting it.
+    from mslearn.worker import tasks as worker_tasks
+    from mslearn.worker.app import app as celery_app
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    ctx = PipelineContext(
+        settings=Settings(profiles_path=Path("profiles.yaml")),
+        db=db,
+        router=ScriptedRouter([]),
+        graph=graph,
+    )
+    monkeypatch.setattr(
+        "mslearn.pipeline.orchestrator.chunk_source_task",
+        type("F", (), {"delay": lambda self, *a: None})(),
+    )
+    app = create_app(context=ctx)
+    with TestClient(app) as c:
+        source_id = c.post(
+            "/api/corpus/sources", json={"ref": str(tiny_pdf), "role": "spine"}
+        ).json()["source_id"]
+        assert db.source_row(source_id)["status"] == "chunking"
+
+        r = c.delete(f"/api/corpus/sources/{source_id}")
+        assert r.status_code == 200
+        assert db.source_row(source_id) is None
+
+        # A redelivered/late chunk_source_task run for the now-deleted source
+        # must be a silent no-op, not resurrect the row.
+        celery_app.conf.task_always_eager = True
+        try:
+            worker_tasks.chunk_source_task.delay(
+                "default", source_id, str(tiny_pdf), "spine", None
+            ).get()
+        finally:
+            celery_app.conf.task_always_eager = False
+        assert db.source_row(source_id) is None
+        assert graph.sources == {}
