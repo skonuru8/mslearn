@@ -19,6 +19,44 @@ class InMemoryGraphStore:
         self.depends_on: set[tuple[str, str]] = set()
         self.spine_seq = dict(spine_seq or {})
         self._concept_first_seq = dict(concept_first_seq or {})
+        self.sources: dict[str, dict] = {}
+        self.chunks: dict[str, dict] = {}
+
+    def upsert_source(self, doc) -> None:
+        self.sources[doc.source_id] = {
+            "source_id": doc.source_id,
+            "source_type": doc.source_type,
+            "role": doc.role,
+            "title": doc.title,
+        }
+
+    def upsert_chunks(self, chunks, embeddings) -> None:
+        if len(chunks) != len(embeddings):
+            raise ValueError(
+                f"embeddings length {len(embeddings)} != chunks length {len(chunks)}"
+            )
+        for chunk, embedding in zip(chunks, embeddings):
+            self.chunks[chunk.chunk_id] = {
+                "chunk_id": chunk.chunk_id,
+                "source_id": chunk.source_id,
+                "seq": chunk.seq,
+                "unit_index": chunk.unit_index,
+                "text": chunk.text,
+                "embedding": list(embedding),
+                "kind": chunk.locator.kind,
+                "page": chunk.locator.page,
+                "href": chunk.locator.href,
+                "url": chunk.locator.url,
+                "para_index": chunk.locator.para_index,
+                "start_s": chunk.locator.start_s,
+                "end_s": chunk.locator.end_s,
+            }
+
+    def get_chunk(self, chunk_id: str) -> dict | None:
+        row = self.chunks.get(chunk_id)
+        if row is None:
+            return None
+        return {k: v for k, v in row.items() if k != "embedding"}
 
     def add_claim(
         self,

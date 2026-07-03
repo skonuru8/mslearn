@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from mslearn.server.routers import admin
+from mslearn.server.routers import admin, corpus
 from mslearn.worker.context import PipelineContext, build_default_context, set_context
 
 
@@ -26,4 +26,5 @@ def create_app(context: PipelineContext | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(admin.router)
+    app.include_router(corpus.router)
     return app
