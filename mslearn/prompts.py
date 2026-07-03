@@ -57,6 +57,39 @@ PROMPTS: dict[str, str] = {
         "- Include only prerequisite edges.\n"
         "- Avoid cycles; if unsure, return fewer edges.\n"
     ),
+    "teach_concept": (
+        "You teach one concept using only the supplied cited claims.\n"
+        "{domain_guidance}\n"
+        "Concept: {concept_name}\n"
+        "Summary: {concept_summary}\n"
+        "Claims:\n{claims}\n"
+        "Conflicts:\n{conflicts}\n"
+        "Memory hints:\n{memory_hints}\n"
+        "Output markdown with exactly these required sections:\n"
+        "## Explanation\n"
+        "## Worked example\n"
+        "## Common misconception\n"
+        "If conflicts are provided, also include:\n"
+        "## Where sources disagree\n"
+        "Rules:\n"
+        "- Every factual sentence must include [claim:<id>] citations.\n"
+        "- Use memory hints only to personalize examples or pacing; they are PERSONALIZATION ONLY "
+        "and must never introduce facts.\n"
+        "- When sources disagree, present each side with [claim:<id>] citations.\n"
+        "- Do not cite memory hints as facts.\n"
+    ),
+    "quiz_question": (
+        "Write one quiz question for a concept using only cited claims.\n"
+        "Return JSON only matching schema: "
+        "{\"question\": \"...\", \"answer\": \"...\", \"claim_ids\": [\"...\"]}.\n"
+        "Rules: every factual premise must be supported by listed claim_ids."
+    ),
+    "quiz_grade": (
+        "Grade a learner answer against the expected answer and cited claims.\n"
+        "Return JSON only matching schema: "
+        "{\"correct\": true, \"feedback\": \"...\", \"claim_ids\": [\"...\"]}.\n"
+        "Rules: feedback facts must come only from cited claims."
+    ),
 }
 
 

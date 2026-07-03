@@ -70,6 +70,8 @@ class InMemoryGraphStore:
         embedding: list[float],
         trust: str = "trusted",
         spine_seq: int | None = None,
+        quote: str = "",
+        chunk_id: str | None = None,
     ) -> None:
         self.claims[claim_id] = {
             "claim_id": claim_id,
@@ -78,6 +80,8 @@ class InMemoryGraphStore:
             "source_id": source_id,
             "embedding": list(embedding),
             "trust": trust,
+            "quote": quote,
+            "chunk_id": chunk_id,
         }
         if spine_seq is not None:
             self.spine_seq[claim_id] = int(spine_seq)
@@ -99,6 +103,10 @@ class InMemoryGraphStore:
     def concept_id_of_claim(self, claim_id: str) -> str | None:
         return self.claim_to_concept.get(claim_id)
 
+    def set_claim_trust(self, claim_id: str, trust: str) -> None:
+        if claim_id in self.claims:
+            self.claims[claim_id]["trust"] = trust
+
     def upsert_concept(self, concept: ConceptRecord) -> None:
         current = self.concepts.get(concept.concept_id, {})
         self.concepts[concept.concept_id] = {
@@ -107,6 +115,8 @@ class InMemoryGraphStore:
             "summary": concept.summary,
             "order_index": current.get("order_index"),
             "dirty": current.get("dirty", False),
+            "teach_md": current.get("teach_md", ""),
+            "teach_at": current.get("teach_at"),
         }
 
     def assign_claim(self, claim_id: str, concept_id: str) -> None:
@@ -135,6 +145,8 @@ class InMemoryGraphStore:
                     "stance": claim["stance"],
                     "trust": claim["trust"],
                     "source_id": claim["source_id"],
+                    "quote": claim.get("quote", ""),
+                    "chunk_id": claim.get("chunk_id"),
                 }
             )
         return sorted(rows, key=lambda r: r["claim_id"])
@@ -175,6 +187,43 @@ class InMemoryGraphStore:
             self.concepts[concept_id]["summary"] = summary
         if order_index is not None:
             self.concepts[concept_id]["order_index"] = int(order_index)
+
+    def get_concept(self, concept_id: str) -> dict | None:
+        concept = self.concepts.get(concept_id)
+        return dict(concept) if concept is not None else None
+
+    def set_concept_teaching(self, concept_id: str, teach_md: str) -> None:
+        if concept_id not in self.concepts:
+            return
+        self.concepts[concept_id]["teach_md"] = teach_md
+        self.concepts[concept_id]["teach_at"] = time.time() if teach_md else None
+
+    def citations_for_claims(self, claim_ids: list[str]) -> list[dict]:
+        rows = []
+        for claim_id in claim_ids:
+            claim = self.claims.get(claim_id)
+            if claim is None:
+                continue
+            chunk = self.chunks.get(claim.get("chunk_id"))
+            if chunk is None:
+                continue
+            rows.append(
+                {
+                    "claim_id": claim_id,
+                    "chunk_id": chunk.get("chunk_id"),
+                    "source_id": chunk.get("source_id"),
+                    "seq": chunk.get("seq"),
+                    "unit_index": chunk.get("unit_index"),
+                    "kind": chunk.get("kind"),
+                    "page": chunk.get("page"),
+                    "href": chunk.get("href"),
+                    "url": chunk.get("url"),
+                    "para_index": chunk.get("para_index"),
+                    "start_s": chunk.get("start_s"),
+                    "end_s": chunk.get("end_s"),
+                }
+            )
+        return rows
 
     def all_concepts(self) -> list[dict]:
         return [

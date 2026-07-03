@@ -1,3 +1,5 @@
+import time
+
 from neo4j import GraphDatabase
 
 from mslearn.graph.records import validate_classification
@@ -225,8 +227,10 @@ class GraphStore:
     def claims_in_concept(self, concept_id: str) -> list[dict]:
         return self.run_read(
             "MATCH (c:Claim)-[:IN_CONCEPT]->(:Concept {concept_id: $concept_id}) "
+            "OPTIONAL MATCH (c)-[:EXTRACTED_FROM]->(ch:Chunk) "
             "RETURN c.claim_id AS claim_id, c.text AS text, c.stance AS stance, "
-            "c.trust AS trust, c.source_id AS source_id ORDER BY c.claim_id",
+            "c.quote AS quote, c.trust AS trust, c.source_id AS source_id, "
+            "ch.chunk_id AS chunk_id ORDER BY c.claim_id",
             concept_id=concept_id,
         )
 
@@ -276,6 +280,37 @@ class GraphStore:
             claim_id=claim_id,
         )
         return rows[0]["concept_id"] if rows else None
+
+    def get_concept(self, concept_id: str) -> dict | None:
+        rows = self.run_read(
+            "MATCH (k:Concept {concept_id: $concept_id}) "
+            "RETURN k.concept_id AS concept_id, k.name AS name, "
+            "k.summary AS summary, k.order_index AS order_index, "
+            "coalesce(k.dirty, false) AS dirty, coalesce(k.teach_md, '') AS teach_md, "
+            "k.teach_at AS teach_at",
+            concept_id=concept_id,
+        )
+        return rows[0] if rows else None
+
+    def set_concept_teaching(self, concept_id: str, teach_md: str) -> None:
+        teach_at = time.time() if teach_md else None
+        self.run_write(
+            "MATCH (k:Concept {concept_id: $concept_id}) "
+            "SET k.teach_md = $teach_md, k.teach_at = $teach_at",
+            concept_id=concept_id, teach_md=teach_md, teach_at=teach_at,
+        )
+
+    def citations_for_claims(self, claim_ids: list[str]) -> list[dict]:
+        return self.run_read(
+            "MATCH (c:Claim)-[:EXTRACTED_FROM]->(ch:Chunk) "
+            "WHERE c.claim_id IN $claim_ids "
+            "RETURN c.claim_id AS claim_id, ch.chunk_id AS chunk_id, "
+            "ch.source_id AS source_id, ch.seq AS seq, ch.unit_index AS unit_index, "
+            "ch.kind AS kind, ch.page AS page, ch.href AS href, ch.url AS url, "
+            "ch.para_index AS para_index, ch.start_s AS start_s, ch.end_s AS end_s "
+            "ORDER BY c.claim_id",
+            claim_ids=claim_ids,
+        )
 
     def set_concept_meta(
         self,
