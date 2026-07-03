@@ -1,3 +1,4 @@
+import logging
 import time
 from dataclasses import replace
 from typing import Callable, Iterator
@@ -9,6 +10,8 @@ from mslearn.providers.claude_code import ClaudeCodeProvider
 from mslearn.providers.ollama import OllamaProvider
 from mslearn.providers.openrouter import OpenRouterProvider
 from mslearn.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class ModelRouter:
@@ -56,10 +59,12 @@ class ModelRouter:
         except ProviderError as exc:
             self._db.log_model_call(role=role, provider=provider.name, model=role_cfg.model,
                                     outcome="error", error=str(exc)[:500])
+            logger.warning("provider error role=%s model=%s: %s", role, role_cfg.model, str(exc)[:120])
             raise
         except Exception as exc:
             self._db.log_model_call(role=role, provider=provider.name, model=role_cfg.model,
                                     outcome="error", error=str(exc)[:500])
+            logger.warning("provider error role=%s model=%s: %s", role, role_cfg.model, str(exc)[:120])
             raise
         self._db.log_model_call(
             role=role, provider=provider.name, model=role_cfg.model,
@@ -76,12 +81,14 @@ class ModelRouter:
             yield from provider.stream(role_cfg.model, self._merged(request, role_cfg))
         except ProviderError as exc:
             outcome, error = "error", str(exc)[:500]
+            logger.warning("provider error role=%s model=%s: %s", role, role_cfg.model, str(exc)[:120])
             raise
         except GeneratorExit:
             outcome = "abandoned"
             raise
         except Exception as exc:
             outcome, error = "error", str(exc)[:500]
+            logger.warning("provider error role=%s model=%s: %s", role, role_cfg.model, str(exc)[:120])
             raise
         finally:
             self._db.log_model_call(
@@ -98,10 +105,12 @@ class ModelRouter:
         except ProviderError as exc:
             self._db.log_model_call(role="embedding", provider=provider.name,
                                     model=role_cfg.model, outcome="error", error=str(exc)[:500])
+            logger.warning("provider error role=embedding model=%s: %s", role_cfg.model, str(exc)[:120])
             raise
         except Exception as exc:
             self._db.log_model_call(role="embedding", provider=provider.name,
                                     model=role_cfg.model, outcome="error", error=str(exc)[:500])
+            logger.warning("provider error role=embedding model=%s: %s", role_cfg.model, str(exc)[:120])
             raise
         self._db.log_model_call(
             role="embedding", provider=provider.name, model=role_cfg.model,

@@ -1,7 +1,10 @@
 from celery import Celery
 from celery.signals import worker_process_init
 
+from mslearn.logging_setup import configure_event_log
 from mslearn.settings import get_settings
+
+configure_event_log()
 
 app = Celery("mslearn", broker=get_settings().redis_url)
 app.conf.update(

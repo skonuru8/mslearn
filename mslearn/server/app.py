@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from mslearn.logging_setup import configure_event_log
 from mslearn.providers.base import ProviderBadOutputError
 from mslearn.server.routers import admin, chat, corpus, evals, exports, memory, projects, study
 from mslearn.worker.context import PipelineContext, build_default_context, set_context
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app(context: PipelineContext | None = None) -> FastAPI:
+    event_log = configure_event_log()
     app = FastAPI(lifespan=lifespan)
     app.state.context = context
     if context is not None:
@@ -31,6 +33,7 @@ def create_app(context: PipelineContext | None = None) -> FastAPI:
 
     @app.exception_handler(ProviderBadOutputError)
     async def provider_bad_output_handler(_request, exc: ProviderBadOutputError):
+        event_log.warning("provider bad output, returning 502: %s", str(exc)[:120])
         return JSONResponse(status_code=502, content={"detail": str(exc)})
 
     app.include_router(admin.router)

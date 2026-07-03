@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from mslearn.adapters.registry import load_source
@@ -5,6 +6,8 @@ from mslearn.chunking import chunk_source
 from mslearn.opsdb import DEFAULT_PROJECT_ID
 from mslearn.worker.context import get_context
 from mslearn.worker.tasks import extract_chunk_task
+
+logger = logging.getLogger(__name__)
 
 
 class IngestError(Exception):
@@ -41,6 +44,7 @@ def ingest_source(
     )
     ctx.db.register_chunk_jobs(doc.source_id, [c.chunk_id for c in chunks], project_id=project_id)
     ctx.db.set_source_status(doc.source_id, "running")
+    logger.info("source registered id=%s ref=%s chunks=%d", doc.source_id, ref, len(chunks))
     if enqueue:
         for chunk in chunks:
             extract_chunk_task.delay(project_id, chunk.chunk_id)

@@ -144,6 +144,17 @@ def test_unexpected_extraction_error_marks_chunk_failed(ctx):
     assert context.db.source_row("s1")["failed_chunks"] == 1
 
 
+def test_chunk_failure_logs_one_warning_line(ctx, caplog):
+    import logging
+
+    context = ctx(ScriptedRouter([TypeError("boom")]))
+    with caplog.at_level(logging.INFO, logger="mslearn"):
+        worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("s1:0" in r.getMessage() and "failed" in r.getMessage() for r in warnings)
+    assert context.db.failure_stats("s1")["failed"] == 1
+
+
 def test_synthesis_failure_records_last_error(ctx, monkeypatch):
     context = ctx(ScriptedRouter([]))
 

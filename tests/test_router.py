@@ -127,6 +127,21 @@ def test_abandoned_stream_logs_abandoned(env):
     assert calls[0]["role"] == "interactive" and calls[0]["outcome"] == "abandoned"
 
 
+def test_provider_error_logs_role_and_model(env, caplog):
+    import logging
+
+    cfg, db, fakes, router = env
+    fakes["openrouter"] = ExplodingProvider("openrouter")
+    router._providers["openrouter"] = fakes["openrouter"]
+    with caplog.at_level(logging.INFO, logger="mslearn"), pytest.raises(ProviderError):
+        router.complete("interactive", request())
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        "role=interactive" in m and "deepseek/deepseek-chat" in m and "kaboom" in m
+        for m in warnings
+    )
+
+
 def test_non_taxonomy_exception_still_logged(env):
     cfg, db, fakes, router = env
 

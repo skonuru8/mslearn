@@ -21,17 +21,23 @@ def _check_failure_monitor(db, source_id: str) -> None:
     min_chunks = int(db.get_tunable("monitor.min_chunks"))
     threshold = db.get_tunable("monitor.failure_rate_threshold")
     if stats["total"] >= min_chunks and stats["problems"] / stats["total"] > threshold:
-        db.set_source_status(
-            source_id,
-            "paused",
-            error=f"failure rate {stats['problems']}/{stats['total']}"
-            f" ({stats['failed']} failed, {stats['rejected']} rejected)",
+        error = (
+            f"failure rate {stats['problems']}/{stats['total']}"
+            f" ({stats['failed']} failed, {stats['rejected']} rejected)"
         )
+        db.set_source_status(source_id, "paused", error=error)
+        logger.warning("source %s paused: %s", source_id, error)
 
 
 def _finalize_chunk(
     ctx, project_id: str, source_id: str, chunk_id: str, status: str, error: str | None = None
 ) -> None:
+    # Single choke point every chunk outcome passes through — the one place
+    # worth an event line instead of scattering logging across every caller.
+    if status in ("failed", "rejected"):
+        logger.warning("chunk %s %s: %s", chunk_id, status, (error or "")[:160])
+    else:
+        logger.info("chunk %s %s", chunk_id, status)
     ctx.db.mark_chunk(chunk_id, status, error=error)
     if status in ("failed", "rejected"):
         _check_failure_monitor(ctx.db, source_id)
@@ -138,3 +144,7 @@ def synthesize_task(project_id: str = "default"):
         project_id, "synthesis:last_run", json.dumps(payload, sort_keys=True)
     )
     ctx.db.set_project_setting(project_id, "synthesis:last_error", "")
+    logger.info(
+        "synthesis done project=%s processed=%d curriculum=%d",
+        project_id, processed, len(ordered),
+    )
