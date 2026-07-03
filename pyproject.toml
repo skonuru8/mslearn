@@ -18,6 +18,10 @@ dependencies = [
     "celery[redis]>=5.4",
     "langgraph>=0.2",
     "rapidfuzz>=3.9",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "genanki>=0.13",
+    "mem0ai>=0.1",
 ]
 
 [project.optional-dependencies]

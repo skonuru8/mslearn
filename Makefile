@@ -1,4 +1,7 @@
-.PHONY: services services-down test check graph-test worker
+.PHONY: services services-down test check graph-test worker serve
+
+serve:
+	.venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000
 
 services:
 	docker compose up -d
