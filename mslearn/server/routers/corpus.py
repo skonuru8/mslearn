@@ -211,4 +211,8 @@ def enqueue_synthesis(ctx=Depends(get_ctx), project_id: str = Depends(get_projec
 @router.get("/synthesis/status")
 def synthesis_status(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
     raw = ctx.db.get_project_setting(project_id, "synthesis:last_run")
-    return {"last_run": json.loads(raw) if raw is not None else None}
+    raw_error = ctx.db.get_project_setting(project_id, "synthesis:last_error")
+    return {
+        "last_run": json.loads(raw) if raw is not None else None,
+        "last_error": json.loads(raw_error) if raw_error else None,
+    }

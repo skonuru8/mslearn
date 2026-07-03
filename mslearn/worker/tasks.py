@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 
 from mslearn.pipeline.contracts import to_claim_record
@@ -11,6 +12,8 @@ from mslearn.pipeline.synthesis import (
 from mslearn.providers.base import ProviderTransientError
 from mslearn.worker.app import app
 from mslearn.worker.context import get_context
+
+logger = logging.getLogger(__name__)
 
 
 def _check_failure_monitor(db, source_id: str) -> None:
@@ -69,19 +72,36 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
                 f"retries exhausted: {exc}"[:500],
             )
         raise
+    except Exception as exc:
+        # Unexpected errors must land in the failures endpoint, not just a
+        # worker traceback that dev_up.sh no longer prints at -l warning.
+        logger.exception("chunk %s failed unexpectedly", chunk_id)
+        _finalize_chunk(
+            ctx, project_id, source_id, chunk_id, "failed", f"unexpected: {exc}"[:500]
+        )
+        return
     if state["error"] is not None:
         _finalize_chunk(ctx, project_id, source_id, chunk_id, "failed", state["error"])
         return
 
     trust = "escalated" if state["escalated"] else "trusted"
     accepted = state["accepted"]
-    if accepted:
-        embeddings = ctx.router.embed([d.text for d in accepted])
-        for draft, embedding in zip(accepted, embeddings):
-            record = to_claim_record(
-                draft, chunk_id=chunk_id, source_id=chunk["source_id"], trust=trust
-            )
-            ctx.graph.upsert_claim(record, embedding, project_id=project_id)
+    try:
+        if accepted:
+            embeddings = ctx.router.embed([d.text for d in accepted])
+            for draft, embedding in zip(accepted, embeddings):
+                record = to_claim_record(
+                    draft, chunk_id=chunk_id, source_id=chunk["source_id"], trust=trust
+                )
+                ctx.graph.upsert_claim(record, embedding, project_id=project_id)
+    except ProviderTransientError:
+        raise
+    except Exception as exc:
+        logger.exception("chunk %s commit failed", chunk_id)
+        _finalize_chunk(
+            ctx, project_id, source_id, chunk_id, "failed", f"unexpected: {exc}"[:500]
+        )
+        return
 
     if not accepted and state["rejected"]:
         reasons = state["rejected"][0].get("reasons", [])
@@ -96,9 +116,18 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
 @app.task
 def synthesize_task(project_id: str = "default"):
     ctx = get_context()
-    dirty = cluster_new_claims(ctx, project_id)
-    processed = process_dirty_concepts(ctx, project_id)
-    ordered = build_curriculum(ctx, project_id)
+    try:
+        dirty = cluster_new_claims(ctx, project_id)
+        processed = process_dirty_concepts(ctx, project_id)
+        ordered = build_curriculum(ctx, project_id)
+    except Exception as exc:
+        logger.exception("synthesis failed for project %s", project_id)
+        ctx.db.set_project_setting(
+            project_id,
+            "synthesis:last_error",
+            json.dumps({"ts": int(time.time()), "error": str(exc)[:500]}, sort_keys=True),
+        )
+        raise
     payload = {
         "ts": int(time.time()),
         "dirty_concepts": len(dirty),
@@ -108,3 +137,4 @@ def synthesize_task(project_id: str = "default"):
     ctx.db.set_project_setting(
         project_id, "synthesis:last_run", json.dumps(payload, sort_keys=True)
     )
+    ctx.db.set_project_setting(project_id, "synthesis:last_error", "")

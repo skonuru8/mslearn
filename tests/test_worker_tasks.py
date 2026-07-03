@@ -135,3 +135,33 @@ def test_transient_exhaustion_marks_failed(ctx):
     except ProviderTransientError:
         pass
     assert context.db.failure_stats("s1")["failed"] == 1
+
+
+def test_unexpected_extraction_error_marks_chunk_failed(ctx):
+    context = ctx(ScriptedRouter([TypeError("the JSON object must be str")]))
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
+    assert context.db.failure_stats("s1")["failed"] == 1
+    assert context.db.source_row("s1")["failed_chunks"] == 1
+
+
+def test_synthesis_failure_records_last_error(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+
+    def boom(_ctx, _project_id):
+        raise RuntimeError("synthesis exploded")
+
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", boom)
+    with pytest.raises(RuntimeError):
+        worker_tasks.synthesize_task.delay("default").get()
+    raw = context.db.get_project_setting("default", "synthesis:last_error")
+    assert raw and "synthesis exploded" in raw
+
+
+def test_synthesis_success_clears_last_error(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+    context.db.set_project_setting("default", "synthesis:last_error", '{"error": "old"}')
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
+    monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    worker_tasks.synthesize_task.delay("default").get()
+    assert not context.db.get_project_setting("default", "synthesis:last_error")

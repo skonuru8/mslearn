@@ -232,7 +232,7 @@ def test_synthesis_status_reflects_last_run_setting(client):
     c, db, _task = client
     r = c.get("/api/corpus/synthesis/status")
     assert r.status_code == 200
-    assert r.json() == {"last_run": None}
+    assert r.json() == {"last_run": None, "last_error": None}
 
     db.set_project_setting(
         "default", "synthesis:last_run",
@@ -240,8 +240,23 @@ def test_synthesis_status_reflects_last_run_setting(client):
     )
     r = c.get("/api/corpus/synthesis/status")
     assert r.json() == {
-        "last_run": {"ts": 123, "dirty_concepts": 2, "processed_concepts": 2, "curriculum_len": 5}
+        "last_run": {"ts": 123, "dirty_concepts": 2, "processed_concepts": 2, "curriculum_len": 5},
+        "last_error": None,
     }
+
+
+def test_synthesis_status_surfaces_last_error(client):
+    c, db, _task = client
+    db.set_project_setting(
+        "default", "synthesis:last_error",
+        json.dumps({"ts": 5, "error": "boom"}),
+    )
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json()["last_error"] == {"ts": 5, "error": "boom"}
+
+    db.set_project_setting("default", "synthesis:last_error", "")
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json()["last_error"] is None
 
 
 def test_upload_unsupported_suffix_rejected(client):

@@ -59,11 +59,14 @@ cleanup() {
 trap cleanup INT TERM
 
 echo "== starting Celery worker =="
-.venv/bin/celery -A mslearn.worker.app worker -Q ingest,judge --concurrency=2 -l info &
+# -l warning: task noise goes to ingest_sources.error / the failures
+# endpoint, not the terminal; real problems still print.
+.venv/bin/celery -A mslearn.worker.app worker -Q ingest,judge --concurrency=2 -l warning &
 WORKER_PID=$!
 
 echo "== starting API (uvicorn) =="
-.venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000 &
+.venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000 \
+  --log-level warning --no-access-log &
 API_PID=$!
 
 echo
