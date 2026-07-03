@@ -158,18 +158,33 @@ class GraphStore:
             claim_id=claim_id, trust=trust,
         )
 
-    def _vector_search(self, index: str, embedding: list[float], k: int) -> list[dict]:
-        return self.run_read(
+    def _vector_search(
+        self, index: str, embedding: list[float], k: int, include_embedding: bool = False
+    ) -> list[dict]:
+        rows = self.run_read(
             f"CALL db.index.vector.queryNodes('{index}', $k, $embedding) "
             "YIELD node, score RETURN node{.*, score: score} AS hit",
             k=k, embedding=embedding,
         )
+        hits = [r["hit"] for r in rows]
+        if not include_embedding:
+            for hit in hits:
+                hit.pop("embedding", None)
+        return hits
 
-    def vector_search_claims(self, embedding: list[float], k: int = 10) -> list[dict]:
-        return [r["hit"] for r in self._vector_search("claim_embedding", embedding, k)]
+    def vector_search_claims(
+        self, embedding: list[float], k: int = 10, include_embedding: bool = False
+    ) -> list[dict]:
+        return self._vector_search(
+            "claim_embedding", embedding, k, include_embedding=include_embedding
+        )
 
-    def vector_search_chunks(self, embedding: list[float], k: int = 10) -> list[dict]:
-        return [r["hit"] for r in self._vector_search("chunk_embedding", embedding, k)]
+    def vector_search_chunks(
+        self, embedding: list[float], k: int = 10, include_embedding: bool = False
+    ) -> list[dict]:
+        return self._vector_search(
+            "chunk_embedding", embedding, k, include_embedding=include_embedding
+        )
 
     # -- concepts -----------------------------------------------------------
     def upsert_concept(self, concept) -> None:
@@ -197,10 +212,9 @@ class GraphStore:
 
     def add_conflict(self, claim_a: str, claim_b: str,
                      classification: str, rationale: str) -> None:
-        """Creates a directed CONFLICTS_WITH edge from claim_a to claim_b.
-        No-op if either Claim doesn't exist — caller must ensure they were upserted first.
-        Use consistent ordering (e.g. lexicographically smaller claim_id as claim_a) to avoid duplicate edges."""
+        """Creates/updates normalized CONFLICTS_WITH edge for a claim pair."""
         validate_classification(classification)
+        claim_a, claim_b = sorted((claim_a, claim_b))
         self.run_write(
             "MATCH (a:Claim {claim_id: $a}), (b:Claim {claim_id: $b}) "
             "MERGE (a)-[r:CONFLICTS_WITH]->(b) "
@@ -244,6 +258,75 @@ class GraphStore:
             "MATCH (k:Concept {dirty: true}) RETURN k.concept_id AS concept_id "
             "ORDER BY k.concept_id",
         )]
+
+    def unassigned_trusted_claims(self) -> list[dict]:
+        return self.run_read(
+            "MATCH (c:Claim) "
+            "WHERE c.trust IN ['trusted', 'escalated'] "
+            "AND NOT (c)-[:IN_CONCEPT]->(:Concept) "
+            "RETURN c.claim_id AS claim_id, c.text AS text, c.stance AS stance, "
+            "c.source_id AS source_id, c.embedding AS embedding "
+            "ORDER BY c.claim_id"
+        )
+
+    def concept_id_of_claim(self, claim_id: str) -> str | None:
+        rows = self.run_read(
+            "MATCH (:Claim {claim_id: $claim_id})-[:IN_CONCEPT]->(k:Concept) "
+            "RETURN k.concept_id AS concept_id LIMIT 1",
+            claim_id=claim_id,
+        )
+        return rows[0]["concept_id"] if rows else None
+
+    def set_concept_meta(
+        self,
+        concept_id: str,
+        name: str | None = None,
+        summary: str | None = None,
+        order_index: int | None = None,
+    ) -> None:
+        updates: list[str] = []
+        params: dict = {"concept_id": concept_id}
+        if name is not None:
+            updates.append("k.name = $name")
+            params["name"] = name
+        if summary is not None:
+            updates.append("k.summary = $summary")
+            params["summary"] = summary
+        if order_index is not None:
+            updates.append("k.order_index = $order_index")
+            params["order_index"] = int(order_index)
+        if not updates:
+            return
+        self.run_write_checked(
+            "MATCH (k:Concept {concept_id: $concept_id}) "
+            f"SET {', '.join(updates)}",
+            **params,
+        )
+
+    def all_concepts(self) -> list[dict]:
+        return self.run_read(
+            "MATCH (k:Concept) "
+            "RETURN k.concept_id AS concept_id, k.name AS name, "
+            "k.summary AS summary, k.order_index AS order_index, "
+            "coalesce(k.dirty, false) AS dirty "
+            "ORDER BY k.concept_id"
+        )
+
+    def spine_concept_order(self) -> list[dict]:
+        return self.run_read(
+            "MATCH (cl:Claim)-[:IN_CONCEPT]->(k:Concept), "
+            "(cl)-[:EXTRACTED_FROM]->(ch:Chunk)<-[:HAS_CHUNK]-(s:Source {role:'spine'}) "
+            "RETURN k.concept_id AS concept_id, min(ch.seq) AS first_seq "
+            "ORDER BY first_seq"
+        )
+
+    def curriculum(self) -> list[dict]:
+        return self.run_read(
+            "MATCH (k:Concept) WHERE k.order_index IS NOT NULL "
+            "RETURN k.concept_id AS concept_id, k.name AS name, "
+            "k.summary AS summary, k.order_index AS order_index "
+            "ORDER BY k.order_index"
+        )
 
     # -- export -----------------------------------------------------------
     def export_all(self) -> tuple[list[dict], list[dict]]:

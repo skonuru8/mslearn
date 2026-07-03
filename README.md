@@ -50,3 +50,23 @@ durable in SQLite — `resume_pending()` re-enqueues after a crash; a source
 whose chunks fail past the failure-rate tunable is paused, never retried
 blindly. Thresholds and prompts are tunables (audited) — the eval loop adjusts
 them; see the spec's self-evolution section.
+
+## Synthesis
+
+When a source finishes (all chunks `done` or `failed`), the worker marks it
+`done` and enqueues `synthesize_task` on the `judge` queue. Synthesis runs in
+three incremental phases: cluster unassigned trusted claims into concepts,
+process dirty concepts for conflict classification + naming, then rebuild the
+curriculum order.
+
+Domain profile steers conflict classification:
+- `corpus.domain_profile=technical` (default): prefer `context_dependent`
+- `corpus.domain_profile=interpretive`: prefer `genuine_debate`
+
+Core tunables:
+- `synth.candidate_k` (default `8.0`)
+- `synth.similarity_floor` (default `0.75`)
+
+Run manually: `python -m mslearn.synth_cli [--local]`.
+For stable scheduling, keep judge queue concurrency low (often `1`) so
+synthesis passes serialize cleanly.

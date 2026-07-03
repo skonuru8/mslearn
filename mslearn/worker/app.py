@@ -12,6 +12,7 @@ app.conf.update(
     broker_connection_retry_on_startup=True,
     task_routes={
         "mslearn.worker.tasks.extract_chunk_task": {"queue": "ingest"},
+        "mslearn.worker.tasks.synthesize_task": {"queue": "judge"},
     },
 )
 app.autodiscover_tasks(["mslearn.worker"])

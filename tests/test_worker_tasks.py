@@ -83,3 +83,21 @@ def test_failure_monitor_pauses_source(ctx, tmp_path):
     for cid in chunk_ids[:10]:  # min_chunks=10, threshold=0.5 — source pauses once failed/total > 0.5 with total>=10 (trips at the 7th failure; remaining iterations skip as paused)
         worker_tasks.extract_chunk_task.delay(cid).get()
     assert db.source_row("s2")["status"] == "paused"
+
+
+def test_persistent_parse_failure_marks_failed(ctx):
+    context = ctx(ScriptedRouter([BAD, BAD, BAD, BAD]))
+    worker_tasks.extract_chunk_task.delay("s1:0").get()
+    assert context.db.failure_stats("s1")["failed"] == 1
+    assert context.graph.claims == {}
+
+
+def test_transient_exhaustion_marks_failed(ctx):
+    from mslearn.providers.base import ProviderTransientError
+
+    context = ctx(ScriptedRouter([ProviderTransientError("net down")] * 10))
+    try:
+        worker_tasks.extract_chunk_task.delay("s1:0").get()
+    except ProviderTransientError:
+        pass
+    assert context.db.failure_stats("s1")["failed"] == 1

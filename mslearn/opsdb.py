@@ -58,6 +58,8 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "extract.max_attempts": 2.0,
     "monitor.failure_rate_threshold": 0.5,
     "monitor.min_chunks": 10.0,
+    "synth.candidate_k": 8.0,
+    "synth.similarity_floor": 0.75,
 }
 
 
@@ -205,6 +207,20 @@ class OpsDB:
                 (source_id,),
             ).fetchall()
         return [r["chunk_id"] for r in rows]
+
+    def try_complete_source(self, source_id: str) -> bool:
+        """Atomically flip running->done when all chunks are accounted for.
+
+        Returns True exactly once per source; safe under concurrent workers.
+        """
+        with self._lock, self.conn:
+            cursor = self.conn.execute(
+                "UPDATE ingest_sources SET status = 'done'"
+                " WHERE source_id = ? AND status = 'running'"
+                " AND done_chunks + failed_chunks >= total_chunks",
+                (source_id,),
+            )
+            return cursor.rowcount == 1
 
     def failure_stats(self, source_id) -> dict:
         with self._lock:

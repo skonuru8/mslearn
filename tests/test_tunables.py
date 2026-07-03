@@ -10,6 +10,8 @@ def test_defaults_registry_exact():
         "extract.max_attempts": 2.0,
         "monitor.failure_rate_threshold": 0.5,
         "monitor.min_chunks": 10.0,
+        "synth.candidate_k": 8.0,
+        "synth.similarity_floor": 0.75,
     }
 
 
