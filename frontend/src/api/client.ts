@@ -1,0 +1,122 @@
+import type { ChatFrame } from "./types";
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(detail: string, status: number) {
+    super(detail);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(path, { ...init, headers });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = (await response.json()) as { detail?: string | unknown };
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+      } else if (body.detail !== undefined) {
+        detail = JSON.stringify(body.detail);
+      }
+    } catch {
+      // keep statusText
+    }
+    throw new ApiError(detail, response.status);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
+
+/** Parse complete SSE event blocks from a buffer; returns unconsumed tail. */
+export function parseSseBuffer(buffer: string): { frames: ChatFrame[]; rest: string } {
+  const frames: ChatFrame[] = [];
+  const parts = buffer.split("\n\n");
+  const rest = parts.pop() ?? "";
+
+  for (const part of parts) {
+    const line = part
+      .split("\n")
+      .map((row) => row.trim())
+      .find((row) => row.startsWith("data: "));
+    if (!line) {
+      continue;
+    }
+    const payload = line.slice("data: ".length);
+    frames.push(JSON.parse(payload) as ChatFrame);
+  }
+
+  return { frames, rest };
+}
+
+export async function streamChat(
+  question: string,
+  sessionId: string,
+  onDelta: (delta: string) => void,
+  onDone: (citations: string[]) => void,
+): Promise<void> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, session_id: sessionId }),
+  });
+
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = (await response.json()) as { detail?: string };
+      if (body.detail) {
+        detail = body.detail;
+      }
+    } catch {
+      // keep statusText
+    }
+    throw new ApiError(detail, response.status);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("streaming response has no body");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = parseSseBuffer(buffer);
+    buffer = parsed.rest;
+    for (const frame of parsed.frames) {
+      if ("delta" in frame) {
+        onDelta(frame.delta);
+      } else if ("done" in frame && frame.done) {
+        onDone(frame.citations);
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const parsed = parseSseBuffer(`${buffer}\n\n`);
+    for (const frame of parsed.frames) {
+      if ("delta" in frame) {
+        onDelta(frame.delta);
+      } else if ("done" in frame && frame.done) {
+        onDone(frame.citations);
+      }
+    }
+  }
+}

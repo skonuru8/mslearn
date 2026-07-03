@@ -1,7 +1,13 @@
-.PHONY: services services-down test check graph-test worker serve
+.PHONY: services services-down test check graph-test worker serve ui-build ui-test
 
 serve:
 	.venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000
+
+ui-build:
+	cd frontend && npm run build
+
+ui-test:
+	cd frontend && npm test
 
 services:
 	docker compose up -d

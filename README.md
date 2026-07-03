@@ -89,3 +89,20 @@ use stable deck/model IDs, and graph exports include both GraphML and JSON.
 
 If `frontend/dist` exists, the API serves it at `/` after all API routers are
 registered, so `/api/*` routes continue to take precedence.
+
+## Frontend
+
+The React UI lives in `frontend/` (Vite + TypeScript). During development, run
+the API and Vite dev server separately — Vite proxies `/api` to port 8000:
+
+    make serve                 # terminal 1
+    cd frontend && npm run dev # terminal 2 → http://localhost:5173
+
+Build for production (served by FastAPI from `frontend/dist`):
+
+    make ui-build              # or: cd frontend && npm run build
+    make serve
+
+Frontend tests:
+
+    make ui-test               # or: cd frontend && npm test
