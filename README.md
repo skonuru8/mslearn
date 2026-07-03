@@ -70,3 +70,22 @@ Core tunables:
 Run manually: `python -m mslearn.synth_cli [--local]`.
 For stable scheduling, keep judge queue concurrency low (often `1`) so
 synthesis passes serialize cleanly.
+
+## Server and exports
+
+Run the API with `make serve` or:
+
+    .venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000
+
+`GET /api/memory` lists learner-memory items and
+`DELETE /api/memory/{memory_id}` removes one. Both return `503` when learner
+memory is unavailable, such as when mem0 is not installed or configured.
+
+`POST /api/exports` with `{"kinds":["markdown","anki","graph"]}` writes files
+under `data/exports/<timestamp>/`. Markdown exports are deterministic and use
+cached teaching Markdown when present; otherwise they render summaries, claims,
+quotes, conflicts, and citation footnotes directly from the graph. Anki exports
+use stable deck/model IDs, and graph exports include both GraphML and JSON.
+
+If `frontend/dist` exists, the API serves it at `/` after all API routers are
+registered, so `/api/*` routes continue to take precedence.

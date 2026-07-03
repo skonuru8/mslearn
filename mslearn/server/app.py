@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from mslearn.providers.base import ProviderBadOutputError
-from mslearn.server.routers import admin, chat, corpus, study
+from mslearn.server.routers import admin, chat, corpus, exports, memory, study
 from mslearn.worker.context import PipelineContext, build_default_context, set_context
 
 
@@ -34,6 +36,11 @@ def create_app(context: PipelineContext | None = None) -> FastAPI:
     app.include_router(admin.router)
     app.include_router(chat.router)
     app.include_router(corpus.router)
+    app.include_router(exports.router)
+    app.include_router(memory.router)
     app.include_router(study.router)
     app.include_router(study.quiz_router)
+    dist = Path("frontend") / "dist"
+    if dist.exists():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
     return app

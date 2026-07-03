@@ -344,6 +344,43 @@ class InMemoryGraphStore:
         rows.sort(key=lambda r: (-r["score"], r["chunk_id"]))
         return rows[:k]
 
+    def export_all(self) -> tuple[list[dict], list[dict]]:
+        nodes = [
+            {
+                "id": f"concept:{concept_id}",
+                "labels": ["Concept"],
+                "properties": {
+                    "concept_id": concept_id,
+                    "name": concept.get("name", ""),
+                    "summary": concept.get("summary", ""),
+                },
+            }
+            for concept_id, concept in sorted(self.concepts.items())
+        ]
+        nodes.extend(
+            {
+                "id": f"claim:{claim_id}",
+                "labels": ["Claim"],
+                "properties": {
+                    "claim_id": claim_id,
+                    "text": claim.get("text", ""),
+                    "stance": claim.get("stance", ""),
+                    "source_id": claim.get("source_id", ""),
+                },
+            }
+            for claim_id, claim in sorted(self.claims.items())
+        )
+        rels = [
+            {
+                "start": f"claim:{claim_id}",
+                "end": f"concept:{concept_id}",
+                "type": "IN_CONCEPT",
+                "properties": {},
+            }
+            for claim_id, concept_id in sorted(self.claim_to_concept.items())
+        ]
+        return nodes, rels
+
 
 class InMemoryLearnerMemory:
     def __init__(self) -> None:
