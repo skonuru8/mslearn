@@ -92,6 +92,20 @@ export interface SynthesisStatusResponse {
     processed_concepts: number;
     curriculum_len: number;
   } | null;
+  last_error?: { ts: number; error: string } | null;
+}
+
+export interface SpendTotals {
+  total_cost_usd: number;
+  total_calls: number;
+}
+
+export interface StatusResponse {
+  worker: boolean;
+  redis: boolean;
+  neo4j: boolean;
+  spend: SpendTotals;
+  synthesis: SynthesisStatusResponse;
 }
 
 export interface ConceptMeta {

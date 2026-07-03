@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { ExportResponse, HealthResponse, ProfileInfo, SpendSummary } from "../api/types";
+import type { ExportResponse, ProfileInfo, StatusResponse } from "../api/types";
 import { ErrorBanner } from "./Status";
+
+const STATUS_POLL_MS = 30_000;
 
 export function AdminBar() {
   const [profiles, setProfiles] = useState<ProfileInfo | null>(null);
-  const [spend, setSpend] = useState<SpendSummary | null>(null);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refreshSpend = useCallback(async () => {
+  const refreshStatus = useCallback(async () => {
     try {
-      setSpend(await api<SpendSummary>("/api/admin/spend?limit=100"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load spend");
+      setStatus(await api<StatusResponse>("/api/status"));
+    } catch {
+      setStatus(null);
     }
   }, []);
 
@@ -28,25 +29,39 @@ export function AdminBar() {
     }
   }, []);
 
-  const refreshHealth = useCallback(async () => {
-    try {
-      setHealth(await api<HealthResponse>("/api/admin/health"));
-    } catch {
-      setHealth(null);
-    }
-  }, []);
-
   useEffect(() => {
     void refreshProfiles();
-    void refreshSpend();
-    void refreshHealth();
-    const spendTimer = window.setInterval(() => void refreshSpend(), 30_000);
-    const healthTimer = window.setInterval(() => void refreshHealth(), 15_000);
-    return () => {
-      window.clearInterval(spendTimer);
-      window.clearInterval(healthTimer);
+    void refreshStatus();
+
+    let timer: number | undefined;
+    const start = () => {
+      if (timer === undefined) {
+        timer = window.setInterval(() => void refreshStatus(), STATUS_POLL_MS);
+      }
     };
-  }, [refreshProfiles, refreshSpend, refreshHealth]);
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshStatus();
+        start();
+      } else {
+        stop();
+      }
+    };
+    if (document.visibilityState === "visible") {
+      start();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshProfiles, refreshStatus]);
 
   async function onProfileChange(name: string) {
     try {
@@ -83,10 +98,10 @@ export function AdminBar() {
       <div className="admin-bar" aria-label="Advanced settings">
         <strong>Advanced</strong>
         <span
-          className={`worker-chip ${health?.worker ? "online" : "offline"}`}
+          className={`worker-chip ${status?.worker ? "online" : "offline"}`}
           title="Background jobs (ingestion, synthesis) need a Celery worker process running alongside the API. See README.md (scripts/dev_up.sh / make run)."
         >
-          {health?.worker
+          {status?.worker
             ? "Background worker running"
             : "Worker offline — sources won't process, synthesis won't run"}
         </span>
@@ -105,10 +120,11 @@ export function AdminBar() {
           </select>
         </label>
         <span>
-          Spend: ${spend?.total_cost_usd.toFixed(4) ?? "—"} · {spend?.total_calls ?? 0} calls
+          Spend: ${status?.spend.total_cost_usd.toFixed(4) ?? "—"} · {status?.spend.total_calls ?? 0}{" "}
+          calls
         </span>
-        <button type="button" onClick={() => void refreshSpend()}>
-          Refresh spend
+        <button type="button" onClick={() => void refreshStatus()}>
+          Refresh
         </button>
         <button type="button" className="primary" disabled={busy} onClick={() => void onExport()}>
           Export all

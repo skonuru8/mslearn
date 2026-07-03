@@ -130,12 +130,39 @@ export function CorpusView() {
     if (!sources.some(isActiveSource)) {
       return;
     }
-    const timer = window.setInterval(() => {
+    const poll = () => {
       void refreshSources().catch(() => {
         /* keep polling */
       });
-    }, 3000);
-    return () => window.clearInterval(timer);
+    };
+    let timer: number | undefined;
+    const start = () => {
+      if (timer === undefined) {
+        timer = window.setInterval(poll, 3000);
+      }
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        poll();
+        start();
+      } else {
+        stop();
+      }
+    };
+    if (document.visibilityState === "visible") {
+      start();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [sources, refreshSources]);
 
   function onFileChosen(file: File | null) {

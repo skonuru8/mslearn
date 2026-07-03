@@ -213,6 +213,16 @@ class OpsDB:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def spend_totals(self) -> dict:
+        """Cheap aggregate for a polling status chip — avoids shipping every
+        model_calls row (recent_calls) just to render two numbers."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS total_calls,"
+                " COALESCE(SUM(cost_usd), 0) AS total_cost_usd FROM model_calls"
+            ).fetchone()
+        return {"total_calls": row["total_calls"], "total_cost_usd": row["total_cost_usd"]}
+
     def get_setting(self, key: str, default: str | None = None) -> str | None:
         with self._lock:
             row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
@@ -366,6 +376,14 @@ class OpsDB:
                 "INSERT OR IGNORE INTO ingest_sources"
                 " (source_id, ref, role, total_chunks, ts, project_id) VALUES (?, ?, ?, ?, ?, ?)",
                 (source_id, ref, role, total_chunks, time.time(), project_id),
+            )
+
+    def set_source_total_chunks(self, source_id, total_chunks: int) -> None:
+        """Backfill total_chunks once chunking finishes (registered at 0 while "chunking")."""
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE ingest_sources SET total_chunks = ? WHERE source_id = ?",
+                (total_chunks, source_id),
             )
 
     def set_source_status(self, source_id, status, error=None, clear_error=False) -> None:

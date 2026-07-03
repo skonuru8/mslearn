@@ -34,6 +34,7 @@ def create_app(context: PipelineContext | None = None) -> FastAPI:
         return JSONResponse(status_code=502, content={"detail": str(exc)})
 
     app.include_router(admin.router)
+    app.include_router(admin.status_router)
     app.include_router(chat.router)
     app.include_router(corpus.router)
     app.include_router(exports.router)

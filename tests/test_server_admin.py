@@ -165,3 +165,32 @@ def test_spend_aggregates_roles_and_cost(client):
     assert body["total_cost_usd"] == pytest.approx(0.03)
     assert body["by_role"] == {"extraction": 1, "synthesis": 2}
     assert len(body["recent_calls"]) == 3
+
+
+def test_spend_totals_aggregate_method(client):
+    _c, db = client
+    assert db.spend_totals() == {"total_calls": 0, "total_cost_usd": 0}
+    db.log_model_call(role="extraction", provider="ollama", model="m1", cost_usd=0.01, outcome="ok")
+    db.log_model_call(role="synthesis", provider="openrouter", model="m2", cost_usd=0.02, outcome="ok")
+    totals = db.spend_totals()
+    assert totals["total_calls"] == 2
+    assert totals["total_cost_usd"] == pytest.approx(0.03)
+
+
+def test_status_consolidates_health_spend_and_synthesis(client, monkeypatch):
+    import mslearn.server.routers.admin as admin_module
+
+    monkeypatch.setattr(admin_module, "worker_online", lambda: False)
+    monkeypatch.setattr(admin_module, "_redis_online", lambda ctx: True)
+    monkeypatch.setattr(admin_module, "_neo4j_online", lambda ctx: True)
+    c, db = client
+    db.log_model_call(role="extraction", provider="ollama", model="m1", cost_usd=0.5, outcome="ok")
+
+    r = c.get("/api/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["worker"] is False
+    assert body["redis"] is True
+    assert body["neo4j"] is True
+    assert body["spend"] == {"total_calls": 1, "total_cost_usd": pytest.approx(0.5)}
+    assert body["synthesis"] == {"last_run": None, "last_error": None}

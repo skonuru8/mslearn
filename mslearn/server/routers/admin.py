@@ -1,12 +1,18 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from mslearn.opsdb import TUNABLE_DEFAULTS
 from mslearn.profiles import get_active_profile_name, load_profiles, set_active_profile_name
-from mslearn.server.deps import get_ctx
+from mslearn.server.deps import get_ctx, get_project_id
 from mslearn.worker.app import worker_online
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+# Unprefixed sibling for the one consolidated poll — lives at /api/status
+# (not /api/admin/status) because it is not an "advanced" endpoint, it's the
+# one request every tab makes every ~30s.
+status_router = APIRouter(prefix="/api", tags=["status"])
 
 
 @router.get("/health")
@@ -16,6 +22,25 @@ def health(ctx=Depends(get_ctx)):
         "worker": worker_online(),
         "redis": _redis_online(ctx),
         "neo4j": _neo4j_online(ctx),
+    }
+
+
+@status_router.get("/status")
+def status(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    """One consolidated poll for the admin bar: worker/redis/neo4j chips,
+    spend totals, and the synthesis banner — replaces separate health/spend
+    timers so an idle tab makes one small request instead of two."""
+    raw = ctx.db.get_project_setting(project_id, "synthesis:last_run")
+    raw_error = ctx.db.get_project_setting(project_id, "synthesis:last_error")
+    return {
+        "worker": worker_online(),
+        "redis": _redis_online(ctx),
+        "neo4j": _neo4j_online(ctx),
+        "spend": ctx.db.spend_totals(),
+        "synthesis": {
+            "last_run": json.loads(raw) if raw is not None else None,
+            "last_error": json.loads(raw_error) if raw_error else None,
+        },
     }
 
 
