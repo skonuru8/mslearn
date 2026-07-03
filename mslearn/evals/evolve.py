@@ -5,10 +5,17 @@ import re
 from dataclasses import replace
 
 from mslearn.evals.gates import GATES
+from mslearn.evals.judged import provenance_violation_count
 from mslearn.evals.metrics import compute_component_metrics
 from mslearn.evals.runner import run_eval
 from mslearn.prompts import PROMPTS, get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest
+
+_PROVENANCE_PREFIX = "provenance."
+
+
+def _is_provenance_adjacent(metric: str | None) -> bool:
+    return bool(metric) and str(metric).startswith(_PROVENANCE_PREFIX)
 
 TUNABLE_BOUNDS: dict[str, tuple[float, float]] = {
     "trust.quote_threshold": (70.0, 98.0),
@@ -111,7 +118,12 @@ def evolve_once(ctx) -> dict:
         run_eval(ctx, offline=True)
 
     baseline = compute_component_metrics(ctx)
-    baseline["provenance.violations"] = 0.0
+    # Real judged provenance count, not a hardcoded 0.0 — otherwise the
+    # provenance gate below is vacuously true and a proposal that increases
+    # provenance violations would auto-apply. Judged runs cost an LLM call
+    # per concept, so we measure it once for the baseline; see below for why
+    # we don't re-measure it per shadow proposal.
+    baseline["provenance.violations"] = float(provenance_violation_count(ctx))
 
     prompt = get_prompt(ctx.db, "evolve_propose")
     tunable_snapshot = {key: ctx.db.get_tunable(key) for key in TUNABLE_BOUNDS}
@@ -157,6 +169,28 @@ def evolve_once(ctx) -> dict:
             rejected.append({"proposal": proposal, "reason": error})
             continue
         target = proposal.get("targets_metric")
+        if _is_provenance_adjacent(target):
+            # Re-measuring judged provenance per proposal costs an LLM call
+            # per concept per shadow run — too expensive to do for every
+            # proposal. Rather than fake a shadow value (which is exactly
+            # the vacuous-pass bug this replaces), refuse to auto-apply and
+            # record the gate as not evaluated.
+            run_id = ctx.db.create_evolution_run(
+                proposal_json=json.dumps(proposal),
+                shadow_before_json=json.dumps(baseline),
+                shadow_after_json=json.dumps({"provenance.violations": "not evaluated"}),
+                accepted=False,
+                reason=str(proposal.get("why", "")),
+            )
+            rejected.append(
+                {
+                    "proposal": proposal,
+                    "run_id": run_id,
+                    "reason": "provenance gate not evaluated for provenance-adjacent"
+                              " proposals — refusing to auto-apply",
+                }
+            )
+            continue
         if proposal.get("kind") == "tunable":
             shadow_ctx = ctx_with_overrides(
                 ctx, tunables={proposal["key"]: float(proposal["value"])}
@@ -167,7 +201,11 @@ def evolve_once(ctx) -> dict:
                 ctx, prompts={f"prompt:{prompt_name}": str(proposal["new_prompt"])}
             )
         shadow_metrics = compute_component_metrics(shadow_ctx)
-        shadow_metrics["provenance.violations"] = 0.0
+        # Not re-measured for this (non-provenance-targeting) proposal;
+        # carry the real baseline forward instead of a fabricated 0.0 so the
+        # shadow-vs-baseline comparison below is an honest "assumed
+        # unchanged", not a silently-always-passing placeholder.
+        shadow_metrics["provenance.violations"] = baseline["provenance.violations"]
         target_improved = _improved(
             target, shadow_metrics.get(target, 0.0), baseline.get(target, 0.0)
         )
@@ -193,6 +231,7 @@ def evolve_once(ctx) -> dict:
             else:
                 prompt_name = str(proposal["key"]).removeprefix("prompt:")
                 ctx.db.set_setting(f"prompt:{prompt_name}", str(proposal["new_prompt"]))
+            ctx.db.set_evolution_run_accepted(run_id, True)
             accepted.append({"proposal": proposal, "run_id": run_id})
         else:
             rejected.append(

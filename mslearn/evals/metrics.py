@@ -184,6 +184,7 @@ def _quote_match_rate(ctx) -> float:
             draft,
             quote_threshold=quote_threshold,
             embed_sim_threshold=ctx.db.get_tunable("trust.embed_sim_threshold"),
+            embedder=ctx.router.embed,
         ).ok:
             passed += 1
     return passed / total if total else 1.0

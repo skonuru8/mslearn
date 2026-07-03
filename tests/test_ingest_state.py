@@ -66,6 +66,23 @@ def test_try_complete_source_all_failed_is_honest(tmp_path):
     assert row["error"] == "all 2 chunks failed"
 
 
+def test_mark_chunk_redelivery_does_not_double_count(tmp_path):
+    # A redelivered Celery task calling mark_chunk twice for the same
+    # already-terminal chunk (e.g. retried across worker processes) must
+    # not double-increment the source's counters.
+    d = db(tmp_path)
+    d.register_source("s1", ref="r", role="spine", total_chunks=1)
+    d.register_chunk_jobs("s1", ["s1:0"])
+    d.mark_chunk("s1:0", "failed", error="boom")
+    d.mark_chunk("s1:0", "failed", error="boom (redelivered)")
+    row = d.source_row("s1")
+    assert row["failed_chunks"] == 1
+    # the redelivered write didn't even overwrite the already-terminal row
+    assert d.conn.execute(
+        "SELECT error FROM chunk_jobs WHERE chunk_id = ?", ("s1:0",)
+    ).fetchone()["error"] == "boom"
+
+
 def test_register_idempotent(tmp_path):
     d = db(tmp_path)
     d.register_source("s1", ref="r", role="spine", total_chunks=2)

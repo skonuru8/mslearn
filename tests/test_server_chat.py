@@ -156,6 +156,26 @@ def test_chat_session_endpoint_returns_last_ten_turns(tmp_path):
     assert turns[-1]["answer"] == "ok"
 
 
+def test_sessions_are_lru_capped(tmp_path, monkeypatch):
+    from mslearn.server.routers import chat as chat_module
+
+    monkeypatch.setattr(chat_module, "_SESSIONS", chat_module.OrderedDict())
+    monkeypatch.setattr(chat_module, "_MAX_SESSIONS", 2)
+    router = ScriptedRouter(embeddings=[[1.0, 0.0] for _ in range(3)], stream_chunks=["ok"])
+    ctx = make_chat_ctx(tmp_path, router)
+    app = create_app(context=ctx)
+
+    with TestClient(app) as client:
+        for session_id in ("s1", "s2", "s3"):
+            response = client.post(
+                "/api/chat", json={"question": "q", "session_id": session_id}
+            )
+            assert response.status_code == 200
+
+    # s1 was least-recently-used once s3 pushed the cap over 2 -> evicted.
+    assert list(chat_module._SESSIONS.keys()) == ["s2", "s3"]
+
+
 def test_mid_stream_provider_error_emits_error_frame(tmp_path):
     from mslearn.providers.base import ProviderError
 

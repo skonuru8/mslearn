@@ -31,7 +31,10 @@ describe("QuizView", () => {
     await screen.findByText(/Score 90/);
     await userEvent.click(screen.getByRole("button", { name: "Next question" }));
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/quiz/next", expect.anything());
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/api\/quiz\/next\?session_id=/),
+        expect.anything(),
+      );
     });
   });
 });

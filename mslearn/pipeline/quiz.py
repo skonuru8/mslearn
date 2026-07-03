@@ -61,7 +61,14 @@ def next_concept(ctx) -> str | None:
     return None
 
 
-def generate_question(ctx, concept_id: str) -> dict:
+def _pending_key(session_id: str, concept_id: str) -> str:
+    # Keyed by (session_id, concept_id): a single global `quiz:pending:{concept_id}`
+    # slot would let concurrent /quiz/next calls for the same concept from
+    # different sessions clobber each other's pending question.
+    return f"quiz:pending:{session_id}:{concept_id}"
+
+
+def generate_question(ctx, concept_id: str, session_id: str) -> dict:
     concept = ctx.graph.get_concept(concept_id)
     if concept is None:
         raise KeyError(f"unknown concept {concept_id!r}")
@@ -87,15 +94,15 @@ def generate_question(ctx, concept_id: str) -> dict:
         "question": question,
         "expected_points": [str(point) for point in expected_points],
     }
-    ctx.db.set_setting(f"quiz:pending:{concept_id}", json.dumps(result))
+    ctx.db.set_setting(_pending_key(session_id, concept_id), json.dumps(result))
     return result
 
 
-def grade_answer(ctx, concept_id: str, answer: str) -> dict:
+def grade_answer(ctx, concept_id: str, answer: str, session_id: str) -> dict:
     concept = ctx.graph.get_concept(concept_id)
     if concept is None:
         raise KeyError(f"unknown concept {concept_id!r}")
-    pending = _pending_question(ctx, concept_id)
+    pending = _pending_question(ctx, session_id, concept_id)
     response = ctx.router.complete(
         "synthesis",
         ModelRequest(
@@ -120,6 +127,9 @@ def grade_answer(ctx, concept_id: str, answer: str) -> dict:
 
     result = {"correct": parsed["correct"], "score_0_100": score, "explanation": explanation}
     ctx.db.record_quiz_result(concept_id, correct=result["correct"], score=score)
+    # Delete the pending slot so a replayed /quiz/answer can't be graded
+    # again against the same cached question (which would inflate quiz_stats).
+    ctx.db.delete_setting(_pending_key(session_id, concept_id))
     if not result["correct"]:
         _record_struggle(ctx.memory, concept, pending)
     return result
@@ -132,8 +142,8 @@ def public_quiz_stats(ctx) -> list[dict]:
     ]
 
 
-def _pending_question(ctx, concept_id: str) -> dict:
-    raw = ctx.db.get_setting(f"quiz:pending:{concept_id}")
+def _pending_question(ctx, session_id: str, concept_id: str) -> dict:
+    raw = ctx.db.get_setting(_pending_key(session_id, concept_id))
     if raw is None:
         raise KeyError(f"no pending quiz question for {concept_id!r}")
     try:

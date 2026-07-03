@@ -42,8 +42,7 @@ def cluster_new_claims(ctx) -> set[str]:
             and h.get("trust") in {"trusted", "escalated"}
         ]
         if not candidates:
-            concept_id = f"k-{anchor_id}"
-            _ensure_concept(graph, known_concepts, concept_id)
+            concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id])
             graph.assign_claim(anchor_id, concept_id)
             graph.mark_concept_dirty(concept_id, True)
             dirty.add(concept_id)
@@ -71,8 +70,7 @@ def cluster_new_claims(ctx) -> set[str]:
                 drops += 1
 
         if not matches:
-            concept_id = f"k-{anchor_id}"
-            _ensure_concept(graph, known_concepts, concept_id)
+            concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id])
             graph.assign_claim(anchor_id, concept_id)
             graph.mark_concept_dirty(concept_id, True)
             dirty.add(concept_id)
@@ -97,8 +95,7 @@ def cluster_new_claims(ctx) -> set[str]:
         matched_unassigned = [
             claim_id for claim_id in matches if graph.concept_id_of_claim(claim_id) is None
         ]
-        concept_id = f"k-{min([anchor_id, *matched_unassigned])}"
-        _ensure_concept(graph, known_concepts, concept_id)
+        concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id, *matched_unassigned])
         graph.assign_claim(anchor_id, concept_id)
         for claim_id in matched_unassigned:
             graph.assign_claim(claim_id, concept_id)
@@ -320,6 +317,26 @@ def _ensure_concept(graph, known_concepts: set[str], concept_id: str) -> None:
         return
     graph.upsert_concept(ConceptRecord(concept_id=concept_id, name=""))
     known_concepts.add(concept_id)
+
+
+def _mint_or_reuse_concept(graph, known_concepts: set[str], claim_ids: list[str]) -> str:
+    """Mint a concept id for claims that were unassigned when the caller last
+    checked, or reuse whichever one of them a concurrent synthesis run
+    assigned in the meantime.
+
+    Concept ids must be sticky once assigned — Anki export guids and
+    exported markdown are keyed off them, so re-minting a different id for
+    claims that already belong somewhere would silently orphan/duplicate
+    exports. Only genuinely new clusters (none of `claim_ids` assigned yet)
+    get a freshly minted id.
+    """
+    for claim_id in claim_ids:
+        existing = graph.concept_id_of_claim(claim_id)
+        if existing is not None:
+            return existing
+    concept_id = f"k-{min(claim_ids)}"
+    _ensure_concept(graph, known_concepts, concept_id)
+    return concept_id
 
 
 def _concept_match_prompt(base: str, anchor: dict, candidates: list[dict]) -> str:

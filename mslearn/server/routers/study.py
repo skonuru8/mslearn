@@ -17,6 +17,7 @@ class FlagRequest(BaseModel):
 class QuizAnswerRequest(BaseModel):
     concept_id: str
     answer: str
+    session_id: str
 
 
 @router.get("/curriculum")
@@ -66,12 +67,12 @@ def flag_claim(claim_id: str, body: FlagRequest, ctx=Depends(get_ctx)):
 
 
 @quiz_router.get("/next")
-def quiz_next(ctx=Depends(get_ctx)):
+def quiz_next(session_id: str, ctx=Depends(get_ctx)):
     concept_id = next_concept(ctx)
     if concept_id is None:
         raise HTTPException(status_code=404, detail="no quiz concepts available")
     try:
-        question = generate_question(ctx, concept_id)
+        question = generate_question(ctx, concept_id, session_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     return {"concept_id": concept_id, "question": question["question"]}
@@ -80,7 +81,7 @@ def quiz_next(ctx=Depends(get_ctx)):
 @quiz_router.post("/answer")
 def quiz_answer(body: QuizAnswerRequest, ctx=Depends(get_ctx)):
     try:
-        return grade_answer(ctx, body.concept_id, body.answer)
+        return grade_answer(ctx, body.concept_id, body.answer, body.session_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
 

@@ -33,13 +33,21 @@ def run_eval(
     else:
         metrics.setdefault("provenance.violations", 0.0)
 
+    relevant_gates = GATES
     if component:
+        # Previously this only trimmed `metrics` for display, while `k in GATES`
+        # let every gated metric back in and the gate loop below iterated all
+        # of GATES unconditionally — so `--component extraction` still failed
+        # the run over an unrelated clustering/tension regression. Scope both
+        # the retained metrics AND the gates actually evaluated to this
+        # component's prefix.
         prefix = f"{component}."
-        metrics = {k: v for k, v in metrics.items() if k.startswith(prefix) or k in GATES}
+        metrics = {k: v for k, v in metrics.items() if k.startswith(prefix)}
+        relevant_gates = {k: v for k, v in GATES.items() if k.startswith(prefix)}
 
     gate_results = {}
     all_passed = True
-    for metric in GATES:
+    for metric in relevant_gates:
         if metric not in metrics:
             gate_results[metric] = False
             all_passed = False

@@ -59,6 +59,28 @@ def test_cluster_drops_hallucinated_match_ids(tmp_path):
     assert router.calls == ["synthesis", "synthesis"]
 
 
+def test_mint_or_reuse_concept_is_sticky_under_races(tmp_path):
+    # A claim in the about-to-be-clustered set was assigned a concept by a
+    # concurrent synthesis run in the tiny window between the caller's
+    # unassigned-check and the mint. The old code minted a brand-new
+    # f"k-{min(...)}" id anyway, silently re-homing the claim and breaking
+    # sticky ids (and the Anki/markdown exports keyed on them). It must
+    # reuse the concept that already claimed it instead.
+    from mslearn.pipeline.synthesis import _mint_or_reuse_concept
+
+    graph = InMemoryGraphStore()
+    graph.add_claim("a1", "x", "neutral", "s1", [1.0, 0.0])
+    graph.add_claim("b1", "y", "neutral", "s1", [1.0, 0.0])
+    graph.upsert_concept(ConceptRecord(concept_id="k-b1", name=""))
+    graph.assign_claim("b1", "k-b1")  # simulates a concurrent run's write
+
+    # a1 < b1 alphabetically, so a naive mint would produce "k-a1" and
+    # silently move b1's cluster identity out from under any export that
+    # already used "k-b1".
+    concept_id = _mint_or_reuse_concept(graph, set(), ["a1", "b1"])
+    assert concept_id == "k-b1"
+
+
 def test_cluster_skips_rejected_claims(tmp_path):
     graph = InMemoryGraphStore()
     graph.add_claim("cl_bad", "bad", "neutral", "s1", [1.0, 0.0, 0.0], trust="rejected")

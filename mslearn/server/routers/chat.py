@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import OrderedDict
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -15,8 +16,13 @@ from mslearn.server.deps import get_ctx
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 _CLAIM_RE = re.compile(r"\[claim:([^\]\s]+)\]")
-_SESSIONS: dict[str, list[dict[str, str]]] = {}
+# Process-local, in-memory, LRU-capped: fine for a single uvicorn worker
+# (this deployment's assumption); breaks session continuity across
+# `uvicorn --workers N` or multiple app processes. Move to OpsDB if that
+# ever changes.
+_SESSIONS: "OrderedDict[str, list[dict[str, str]]]" = OrderedDict()
 _MAX_TURNS = 10
+_MAX_SESSIONS = 500
 
 
 class ChatRequest(BaseModel):
@@ -70,6 +76,8 @@ def _messages(ctx, session_id: str, question: str, retrieval: dict) -> list[Mode
             ),
         )
     ]
+    if session_id in _SESSIONS:
+        _SESSIONS.move_to_end(session_id)
     for turn in _SESSIONS.get(session_id, [])[-_MAX_TURNS:]:
         messages.append(ModelMessage(role="user", content=turn["question"]))
         messages.append(ModelMessage(role="assistant", content=turn["answer"]))
@@ -148,6 +156,9 @@ def _append_turn(session_id: str, question: str, answer: str) -> None:
     turns = _SESSIONS.setdefault(session_id, [])
     turns.append({"question": question, "answer": answer})
     del turns[:-_MAX_TURNS]
+    _SESSIONS.move_to_end(session_id)
+    while len(_SESSIONS) > _MAX_SESSIONS:
+        _SESSIONS.popitem(last=False)  # evict least-recently-used session
 
 
 def _record_interaction(memory, question: str) -> None:

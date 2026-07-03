@@ -94,7 +94,7 @@ def test_quiz_next_generates_reasoning_question_and_caches_pending(tmp_path):
     ctx = make_ctx(tmp_path, router)
 
     with make_client(ctx) as client:
-        response = client.get("/api/quiz/next")
+        response = client.get("/api/quiz/next", params={"session_id": "sess-1"})
 
     assert response.status_code == 200
     assert response.json() == {
@@ -106,11 +106,61 @@ def test_quiz_next_generates_reasoning_question_and_caches_pending(tmp_path):
     prompt = router.requests[0].messages[0].content
     assert "reasoning" in prompt.lower()
     assert "[claim:c1]" in prompt
-    pending = json.loads(ctx.db.get_setting("quiz:pending:k1"))
+    pending = json.loads(ctx.db.get_setting("quiz:pending:sess-1:k1"))
     assert pending["question"] == "Why does a TTL reduce stale-cache risk?"
     assert pending["expected_points"] == [
         "TTL bounds how long stale cached data can survive [claim:c1]."
     ]
+
+
+def test_pending_question_is_session_scoped_and_deleted_after_grading(tmp_path):
+    router = CapturingScriptedRouter(
+        [
+            {
+                "question": "Session A's question",
+                "expected_points": ["point a [claim:c1]."],
+            },
+            {
+                "question": "Session B's question",
+                "expected_points": ["point b [claim:c1]."],
+            },
+            {
+                "correct": True,
+                "score_0_100": 90,
+                "explanation": "Nicely done [claim:c1].",
+            },
+        ]
+    )
+    ctx = make_ctx(tmp_path, router)
+
+    with make_client(ctx) as client:
+        r_a = client.get("/api/quiz/next", params={"session_id": "sess-a"})
+        r_b = client.get("/api/quiz/next", params={"session_id": "sess-b"})
+        assert r_a.json()["question"] == "Session A's question"
+        assert r_b.json()["question"] == "Session B's question"
+
+        # Session A's pending question is untouched by session B's /next call.
+        pending_a = json.loads(ctx.db.get_setting("quiz:pending:sess-a:k1"))
+        assert pending_a["question"] == "Session A's question"
+
+        grade = client.post(
+            "/api/quiz/answer",
+            json={"concept_id": "k1", "answer": "answer", "session_id": "sess-a"},
+        )
+        assert grade.status_code == 200
+
+    # Graded slot is deleted...
+    assert ctx.db.get_setting("quiz:pending:sess-a:k1") is None
+    # ...and a replay of the same answer against the now-deleted slot fails
+    # instead of re-grading against a stale cached question.
+    with make_client(ctx) as client:
+        replay = client.post(
+            "/api/quiz/answer",
+            json={"concept_id": "k1", "answer": "answer again", "session_id": "sess-a"},
+        )
+    assert replay.status_code == 404
+    # Session B's pending question survived session A's grading.
+    assert ctx.db.get_setting("quiz:pending:sess-b:k1") is not None
 
 
 def test_quiz_question_excludes_rejected_claims(tmp_path):
@@ -131,7 +181,7 @@ def test_quiz_question_excludes_rejected_claims(tmp_path):
     ctx.graph.assign_claim("c3", "k1")
 
     with make_client(ctx) as client:
-        response = client.get("/api/quiz/next")
+        response = client.get("/api/quiz/next", params={"session_id": "sess-1"})
 
     assert response.status_code == 200
     prompt = router.requests[0].messages[0].content
@@ -155,7 +205,7 @@ def test_quiz_next_prefers_recent_failures_before_unquizzed_concepts(tmp_path):
     ctx.db.record_quiz_result("k2", correct=False, score=35)
 
     with make_client(ctx) as client:
-        response = client.get("/api/quiz/next")
+        response = client.get("/api/quiz/next", params={"session_id": "sess-1"})
 
     assert response.status_code == 200
     assert response.json()["concept_id"] == "k2"
@@ -174,7 +224,7 @@ def test_quiz_answer_records_failure_and_stores_struggle_not_answer(tmp_path):
     )
     ctx = make_ctx(tmp_path, router, memory=memory)
     ctx.db.set_setting(
-        "quiz:pending:k1",
+        "quiz:pending:sess-1:k1",
         json.dumps(
             {
                 "question": "Why does a TTL reduce stale-cache risk?",
@@ -188,7 +238,7 @@ def test_quiz_answer_records_failure_and_stores_struggle_not_answer(tmp_path):
     with make_client(ctx) as client:
         response = client.post(
             "/api/quiz/answer",
-            json={"concept_id": "k1", "answer": "my private wrong answer"},
+            json={"concept_id": "k1", "answer": "my private wrong answer", "session_id": "sess-1"},
         )
 
     assert response.status_code == 200
@@ -251,7 +301,7 @@ def test_bad_quiz_judge_output_surfaces_as_502(tmp_path):
     )
     ctx = make_ctx(tmp_path, router)
     ctx.db.set_setting(
-        "quiz:pending:k1",
+        "quiz:pending:sess-1:k1",
         json.dumps(
             {
                 "question": "Why does a TTL reduce stale-cache risk?",
@@ -265,7 +315,7 @@ def test_bad_quiz_judge_output_surfaces_as_502(tmp_path):
     with make_client(ctx) as client:
         response = client.post(
             "/api/quiz/answer",
-            json={"concept_id": "k1", "answer": "Because it expires entries."},
+            json={"concept_id": "k1", "answer": "Because it expires entries.", "session_id": "sess-1"},
         )
 
     assert response.status_code == 502

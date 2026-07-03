@@ -154,6 +154,10 @@ class OpsDB:
                     (key, value),
                 )
 
+    def delete_setting(self, key: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+
     def get_tunable(self, key: str) -> float:
         with self._lock:
             row = self.conn.execute(
@@ -231,17 +235,29 @@ class OpsDB:
             )
 
     def mark_chunk(self, chunk_id, status, error=None) -> None:
+        """Transition a chunk job's status, atomically guarding against double-counting.
+
+        A redelivered Celery task (retried across worker processes, not just
+        within one) could otherwise race a read-then-write terminal-state
+        check and double-increment done_chunks/failed_chunks/rejected_chunks.
+        The status/error/attempts write itself is now gated by the same
+        single atomic UPDATE (WHERE status NOT IN the terminal set) so an
+        already-terminal chunk can't be re-processed at all, not just
+        re-counted.
+        """
+        terminal = ("done", "failed", "rejected")
         with self._lock, self.conn:
             row = self.conn.execute(
-                "SELECT source_id, status FROM chunk_jobs WHERE chunk_id = ?", (chunk_id,)
+                "SELECT source_id FROM chunk_jobs WHERE chunk_id = ?", (chunk_id,)
             ).fetchone()
-            self.conn.execute(
-                "UPDATE chunk_jobs SET status = ?, error = ?,"
-                " attempts = attempts + 1 WHERE chunk_id = ?",
+            if row is None:
+                return
+            cursor = self.conn.execute(
+                "UPDATE chunk_jobs SET status = ?, error = ?, attempts = attempts + 1"
+                " WHERE chunk_id = ? AND status NOT IN ('done', 'failed', 'rejected')",
                 (status, error, chunk_id),
             )
-            terminal = ("done", "failed", "rejected")
-            if row and status in terminal and row["status"] not in terminal:
+            if cursor.rowcount == 1 and status in terminal:
                 column = {"done": "done_chunks", "failed": "failed_chunks",
                           "rejected": "rejected_chunks"}[status]
                 self.conn.execute(
@@ -446,6 +462,19 @@ class OpsDB:
                 ),
             )
             return int(cur.lastrowid)
+
+    def set_evolution_run_accepted(self, run_id: int, accepted: bool) -> None:
+        """Flip an evolution_runs row's accepted flag after the accept decision is made.
+
+        create_evolution_run always writes accepted=False up front (the row is
+        created before the decision exists); this is the only way that flag
+        is ever set True, so history/API views reflect what was actually applied.
+        """
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE evolution_runs SET accepted = ? WHERE id = ?",
+                (1 if accepted else 0, run_id),
+            )
 
     def evolution_history(self, limit: int = 20) -> list[dict]:
         with self._lock:

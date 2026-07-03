@@ -1,5 +1,5 @@
 from mslearn.evals.judged import provenance_citations
-from mslearn.evals.metrics import extraction_pr, grounding_rates
+from mslearn.evals.metrics import _quote_match_rate, extraction_pr, grounding_rates
 from mslearn.opsdb import OpsDB
 from mslearn.worker.context import PipelineContext
 from tests.fakes import InMemoryGraphStore, ScriptedRouter
@@ -35,6 +35,25 @@ def test_extraction_pr_with_scripted_router(tmp_path, monkeypatch):
     metrics = extraction_pr(ctx)
     assert metrics["precision"] == 1.0
     assert metrics["recall"] == 1.0
+
+
+def test_quote_match_rate_applies_embedding_similarity_axis(tmp_path):
+    # Quote fuzzy-matches the chunk perfectly, but claim/quote embeddings are
+    # orthogonal — without passing the router's embedder into check_claim,
+    # schema.quote_match_rate would skip this axis entirely and inflate to
+    # 1.0. With the embedder wired in, the low similarity fails the claim.
+    graph = InMemoryGraphStore()
+    graph.chunks["ch1"] = {"chunk_id": "ch1", "text": "the exact quote text appears here"}
+    graph.add_claim(
+        "c1", "Some claim text", "neutral", "s1", [1.0, 0.0],
+        quote="the exact quote text", chunk_id="ch1",
+    )
+    router = ScriptedRouter([], embeddings=[[1.0, 0.0], [0.0, 1.0]])
+    db = OpsDB(tmp_path / "ops.db")
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+    rate = _quote_match_rate(ctx)
+    assert rate == 0.0
+    assert router.embed_texts == ["Some claim text", "the exact quote text"]
 
 
 def test_provenance_unknown_claim():

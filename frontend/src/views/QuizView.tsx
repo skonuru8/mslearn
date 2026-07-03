@@ -5,6 +5,18 @@ import type { QuizGrade, QuizNext, QuizStatRow } from "../api/types";
 import { MarkdownWithCitations } from "../components/MarkdownWithCitations";
 import { ErrorBanner, Loading } from "../components/Status";
 
+const SESSION_KEY = "mslearn.quiz.session";
+
+function quizSessionId(): string {
+  const existing = sessionStorage.getItem(SESSION_KEY);
+  if (existing) {
+    return existing;
+  }
+  const created = crypto.randomUUID();
+  sessionStorage.setItem(SESSION_KEY, created);
+  return created;
+}
+
 export function QuizView() {
   const [quiz, setQuiz] = useState<QuizNext | null>(null);
   const [answer, setAnswer] = useState("");
@@ -18,7 +30,9 @@ export function QuizView() {
     setGrade(null);
     setAnswer("");
     try {
-      setQuiz(await api<QuizNext>("/api/quiz/next"));
+      setQuiz(
+        await api<QuizNext>(`/api/quiz/next?session_id=${encodeURIComponent(quizSessionId())}`),
+      );
       setError(null);
     } catch (err) {
       setQuiz(null);
@@ -49,7 +63,11 @@ export function QuizView() {
     try {
       const result = await api<QuizGrade>("/api/quiz/answer", {
         method: "POST",
-        body: JSON.stringify({ concept_id: quiz.concept_id, answer }),
+        body: JSON.stringify({
+          concept_id: quiz.concept_id,
+          answer,
+          session_id: quizSessionId(),
+        }),
       });
       setGrade(result);
       await loadStats();
