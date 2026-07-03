@@ -1,6 +1,6 @@
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.extraction_graph import run_extraction
-from mslearn.providers.base import ModelResponse, ProviderError
+from mslearn.providers.base import ModelResponse, ProviderBadOutputError, ProviderError
 
 CHUNK = "Cache invalidation is one of the two hard problems in computer science."
 GOOD = {"claims": [{"text": "Cache invalidation is hard.", "stance": "neutral",
@@ -66,6 +66,25 @@ def test_provider_error_sets_error(tmp_path):
     router = ScriptedRouter([ProviderError("down")])
     state = run_extraction(router, db(tmp_path), "c1", CHUNK)
     assert state["error"] == "down" and state["accepted"] == []
+
+
+def test_bad_output_retries_then_passes(tmp_path):
+    # The user's exact symptom: a truncated-JSON ProviderBadOutputError (e.g.
+    # finish_reason=length) must not fail the chunk permanently — it gets a
+    # retry within extract.max_attempts, same as a parse failure.
+    router = ScriptedRouter([ProviderBadOutputError("invalid JSON from openrouter"), GOOD])
+    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    assert len(state["accepted"]) == 1
+    assert state["error"] is None
+    assert router.calls == ["extraction", "extraction"]
+
+
+def test_bad_output_exhausted_escalates_with_rejects(tmp_path):
+    router = ScriptedRouter([ProviderBadOutputError("bad")] * 4)
+    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    assert state["escalated"] is True
+    assert state["accepted"] == []
+    assert state["error"] is None
 
 
 def test_empty_claims_is_valid_end(tmp_path):

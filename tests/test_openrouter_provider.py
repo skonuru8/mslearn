@@ -64,6 +64,21 @@ def test_bad_json_with_schema_raises():
 
 
 @respx.mock
+def test_truncated_json_error_carries_finish_reason():
+    # The user's exact symptom: a reasoning model truncates mid-JSON
+    # (finish_reason=length), producing degenerate content like
+    # '{ "claims": … \t\n \t\n '. Without finish_reason in the message this
+    # is indistinguishable from a model that just wrote garbage.
+    body = {
+        "choices": [{"message": {"content": '{ "claims": '}, "finish_reason": "length"}],
+        "usage": {},
+    }
+    respx.post(URL).respond(json=body)
+    with pytest.raises(ProviderBadOutputError, match="finish_reason='length'"):
+        OpenRouterProvider("k").complete("m", req({"type": "object"}))
+
+
+@respx.mock
 def test_429_is_transient():
     respx.post(URL).respond(status_code=429)
     with pytest.raises(ProviderTransientError):

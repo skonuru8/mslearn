@@ -14,6 +14,7 @@ from mslearn.prompts import get_prompt
 from mslearn.providers.base import (
     ModelMessage,
     ModelRequest,
+    ProviderBadOutputError,
     ProviderError,
     ProviderTransientError,
 )
@@ -55,6 +56,14 @@ def build_extraction_graph(router, db: OpsDB):
             drafts = parse_extraction(response.parsed)
         except ProviderTransientError:
             raise
+        except ProviderBadOutputError as exc:
+            # A truncated/malformed model response (e.g. finish_reason=length
+            # cutting off mid-JSON) is a parse-shaped failure, not a terminal
+            # provider error — treat it like ExtractionParseError so one bad
+            # generation gets a retry within the existing attempt budget
+            # instead of failing the chunk outright.
+            return {"drafts": [], "reasons": state["reasons"] + [f"bad output: {exc}"],
+                    "attempt": state["attempt"] + 1, "parse_error": True}
         except ProviderError as exc:
             return {"error": str(exc)[:500], "drafts": []}
         except ExtractionParseError as exc:

@@ -97,8 +97,10 @@ class OpenRouterProvider(ModelProvider):
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError as exc:
+                finish_reason = choice.get("finish_reason")
                 raise ProviderBadOutputError(
-                    f"invalid JSON from openrouter: {text[:200]!r}"
+                    f"invalid JSON from openrouter (finish_reason={finish_reason!r}):"
+                    f" {text[:200]!r}"
                 ) from exc
         usage = data.get("usage") or {}
         return ModelResponse(
