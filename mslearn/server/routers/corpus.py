@@ -165,6 +165,18 @@ def resume_source(source_id: str, ctx=Depends(get_ctx), project_id: str = Depend
     return {"source_id": source_id, "status": "running", "resumed_chunks": resumed}
 
 
+@router.delete("/sources/{source_id}")
+def delete_source(source_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    if ctx.db.source_row(source_id, project_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
+    affected = ctx.graph.delete_source(source_id, project_id=project_id)
+    ctx.db.delete_source(source_id, project_id=project_id)
+    if affected:
+        # curriculum + surviving dirty concepts need a rebuild pass
+        synthesize_task.delay(project_id)
+    return {"source_id": source_id, "deleted": True, "affected_concepts": len(affected)}
+
+
 @router.get("/sources/{source_id}/failures")
 def source_failures(source_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
     if ctx.db.source_row(source_id, project_id) is None:

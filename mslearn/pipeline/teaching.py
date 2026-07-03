@@ -48,8 +48,10 @@ def _trusted_claims(claims: list[dict]) -> list[dict]:
 
 
 def _complete_teaching(ctx, content: str) -> str:
+    # Teaching is user-facing (spec: interactive latency = seconds); the
+    # synthesis role maps to a reasoning-class model that takes minutes.
     response = ctx.router.complete(
-        "synthesis",
+        "interactive",
         ModelRequest(
             messages=[ModelMessage(role="user", content=content)],
             max_tokens=int(ctx.db.get_tunable("teach.max_tokens")),

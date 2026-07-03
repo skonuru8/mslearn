@@ -225,6 +225,57 @@ class GraphStore:
             project_id=project_id,
         )
 
+    def delete_source(self, source_id: str, *, project_id: str = "default") -> list[str]:
+        """Delete a source with its chunks and claims.
+
+        Concepts that lose claims are marked dirty with their cached teaching
+        cleared; concepts left with no claims at all are deleted. Returns the
+        affected concept ids (including ones that were deleted).
+        """
+        affected = [
+            row["concept_id"]
+            for row in self.run_read(
+                "MATCH (cl:Claim {source_id: $source_id, project_id: $project_id})"
+                "-[:IN_CONCEPT]->(k:Concept) RETURN DISTINCT k.concept_id AS concept_id",
+                source_id=source_id,
+                project_id=project_id,
+            )
+        ]
+        self.run_write(
+            "MATCH (cl:Claim {source_id: $source_id, project_id: $project_id})"
+            " DETACH DELETE cl",
+            source_id=source_id,
+            project_id=project_id,
+        )
+        self.run_write(
+            "MATCH (ch:Chunk {source_id: $source_id, project_id: $project_id})"
+            " DETACH DELETE ch",
+            source_id=source_id,
+            project_id=project_id,
+        )
+        self.run_write(
+            "MATCH (s:Source {source_id: $source_id, project_id: $project_id})"
+            " DETACH DELETE s",
+            source_id=source_id,
+            project_id=project_id,
+        )
+        if affected:
+            self.run_write(
+                "MATCH (k:Concept {project_id: $project_id})"
+                " WHERE k.concept_id IN $ids AND NOT (:Claim)-[:IN_CONCEPT]->(k)"
+                " DETACH DELETE k",
+                ids=affected,
+                project_id=project_id,
+            )
+            self.run_write(
+                "MATCH (k:Concept {project_id: $project_id})"
+                " WHERE k.concept_id IN $ids"
+                " SET k.dirty = true, k.teach_md = ''",
+                ids=affected,
+                project_id=project_id,
+            )
+        return affected
+
     def set_claim_trust(self, claim_id: str, trust: str, *, project_id: str = "default") -> None:
         """No-op if the Claim node doesn't exist — caller must ensure it was upserted first."""
         self.run_write(

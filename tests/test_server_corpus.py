@@ -268,3 +268,35 @@ def test_upload_unsupported_suffix_rejected(client):
     )
     assert r.status_code == 422
     assert "unsupported file type" in r.json()["detail"]
+
+
+def test_delete_source_removes_rows_and_dirties_concepts(client, tiny_pdf, monkeypatch):
+    from mslearn.graph.records import ConceptRecord
+
+    c, db, _task = client
+    synth = NoDelaySynthesisTask()
+    monkeypatch.setattr("mslearn.server.routers.corpus.synthesize_task", synth)
+
+    source_id = c.post(
+        "/api/corpus/sources", json={"ref": str(tiny_pdf), "role": "spine"}
+    ).json()["source_id"]
+    graph = c.app.state.context.graph
+    graph.add_claim("cl1", "t", "neutral", source_id, [1.0, 0.0])
+    graph.add_claim("cl2", "t2", "neutral", "other-source", [1.0, 0.0])
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name="n", summary="s"))
+    graph.assign_claim("cl1", "k1")
+    graph.assign_claim("cl2", "k1")
+
+    r = c.delete(f"/api/corpus/sources/{source_id}")
+    assert r.status_code == 200
+    assert r.json() == {"source_id": source_id, "deleted": True, "affected_concepts": 1}
+    assert db.source_row(source_id) is None
+    assert "cl1" not in graph.claims and "cl2" in graph.claims
+    assert graph.concepts["k1"]["dirty"] is True and graph.concepts["k1"]["teach_md"] == ""
+    assert synth.delayed == ["default"]
+
+
+def test_delete_source_unknown_404(client):
+    c, _db, _task = client
+    r = c.delete("/api/corpus/sources/nope")
+    assert r.status_code == 404

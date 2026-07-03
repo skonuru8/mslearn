@@ -103,6 +103,40 @@ class InMemoryGraphStore:
             return None
         return {k: v for k, v in row.items() if k != "embedding"}
 
+    def delete_source(self, source_id: str, *, project_id: str = "default") -> list[str]:
+        doomed_claims = [
+            cid
+            for cid, row in self.claims.items()
+            if row.get("source_id") == source_id
+            and row.get("project_id", "default") == project_id
+        ]
+        affected = sorted(
+            {
+                self.claim_to_concept[cid]
+                for cid in doomed_claims
+                if cid in self.claim_to_concept
+            }
+        )
+        for cid in doomed_claims:
+            self.claims.pop(cid, None)
+            self.claim_to_concept.pop(cid, None)
+        self.chunks = {
+            k: v
+            for k, v in self.chunks.items()
+            if not (
+                v.get("source_id") == source_id
+                and v.get("project_id", "default") == project_id
+            )
+        }
+        self.sources.pop(source_id, None)
+        for concept_id in affected:
+            if concept_id not in self.claim_to_concept.values():
+                self.concepts.pop(concept_id, None)
+            elif concept_id in self.concepts:
+                self.concepts[concept_id]["dirty"] = True
+                self.concepts[concept_id]["teach_md"] = ""
+        return affected
+
     def sample_chunks(self, limit: int = 50, *, project_id: str = "default") -> list[dict]:
         rows = [
             row

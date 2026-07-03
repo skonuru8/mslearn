@@ -85,7 +85,7 @@ def test_generate_teaching_caches_after_first_call(tmp_path):
     second = generate_teaching(ctx, "k1")
 
     assert first == second == good_markdown()
-    assert router.calls == ["synthesis"]
+    assert router.calls == ["interactive"]
     assert ctx.graph.get_concept("k1")["teach_md"] == good_markdown()
     assert router.requests[0].max_tokens == int(ctx.db.get_tunable("teach.max_tokens"))
 
@@ -99,7 +99,7 @@ def test_generate_teaching_force_regenerates_cached_teaching(tmp_path):
     result = generate_teaching(ctx, "k1", force=True)
 
     assert result == good_markdown()
-    assert router.calls == ["synthesis"]
+    assert router.calls == ["interactive"]
     assert ctx.graph.get_concept("k1")["teach_md"] == good_markdown()
 
 
@@ -123,7 +123,7 @@ def test_generate_teaching_retries_once_when_conflict_section_missing(tmp_path):
     result = generate_teaching(ctx, "k1")
 
     assert result == corrected
-    assert router.calls == ["synthesis", "synthesis"]
+    assert router.calls == ["interactive", "interactive"]
     retry_prompt = router.requests[-1].messages[-1].content
     assert "must include `## Where sources disagree`" in retry_prompt
 
@@ -147,7 +147,7 @@ def test_generate_teaching_errors_after_retry_missing_conflict_section(tmp_path)
     with pytest.raises(TeachingError):
         generate_teaching(ctx, "k1")
 
-    assert router.calls == ["synthesis", "synthesis"]
+    assert router.calls == ["interactive", "interactive"]
 
 
 def test_generate_teaching_includes_memory_hints_as_personalization_only(tmp_path):

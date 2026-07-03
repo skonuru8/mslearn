@@ -51,3 +51,45 @@ def test_vector_search_orders_by_similarity(clean_graph):
     hits = store.vector_search_claims(unit_vec(0), k=2)
     assert hits[0]["claim_id"] == "cl1"
     assert hits[0]["score"] >= hits[1]["score"]
+
+
+def test_delete_source_removes_data_and_dirties_shared_concepts(clean_graph):
+    from mslearn.graph.records import ConceptRecord
+
+    store, chunks = seeded(clean_graph)
+    store.upsert_claim(claim("cl1", chunks[0].chunk_id), unit_vec(0))
+    other = ClaimRecord(claim_id="cl-other", chunk_id=chunks[0].chunk_id,
+                        source_id="srcB", text="other", stance="neutral",
+                        quote="Invalidation is harder.", trust="trusted")
+    store.upsert_claim(other, unit_vec(1))
+    store.upsert_concept(ConceptRecord(concept_id="k1", name="Caching"))
+    store.upsert_concept(ConceptRecord(concept_id="k2", name="Solo"))
+    store.assign_claim("cl1", "k1")
+    store.assign_claim("cl-other", "k1")
+    store.set_concept_teaching("k1", "cached md")
+
+    affected = store.delete_source("srcA")
+
+    assert affected == ["k1"]
+    assert store.claims_for_source("srcA") == []
+    assert store.chunks_for_source("srcA") == []
+    # shared concept survives, dirty, teaching cleared
+    k1 = store.get_concept("k1")
+    assert k1 is not None and k1["dirty"] is True and not k1.get("teach_md")
+    # untouched concept intact; other source's claim intact
+    assert store.get_concept("k2") is not None
+    assert [r["claim_id"] for r in store.claims_for_source("srcB")] == []  # chunk deleted with srcA
+
+
+def test_delete_source_drops_empty_concepts(clean_graph):
+    from mslearn.graph.records import ConceptRecord
+
+    store, chunks = seeded(clean_graph)
+    store.upsert_claim(claim("cl1", chunks[0].chunk_id), unit_vec(0))
+    store.upsert_concept(ConceptRecord(concept_id="k1", name="Caching"))
+    store.assign_claim("cl1", "k1")
+
+    affected = store.delete_source("srcA")
+
+    assert affected == ["k1"]
+    assert store.get_concept("k1") is None

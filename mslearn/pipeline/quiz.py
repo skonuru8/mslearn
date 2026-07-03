@@ -74,7 +74,7 @@ def generate_question(ctx, concept_id: str, session_id: str, project_id: str = "
         raise KeyError(f"unknown concept {concept_id!r}")
     claims = _trusted_claims(ctx.graph.claims_in_concept(concept_id, project_id=project_id))
     response = ctx.router.complete(
-        "synthesis",
+        "interactive",
         ModelRequest(
             messages=[
                 ModelMessage(
@@ -107,7 +107,7 @@ def grade_answer(
         raise KeyError(f"unknown concept {concept_id!r}")
     pending = _pending_question(ctx, session_id, concept_id)
     response = ctx.router.complete(
-        "synthesis",
+        "interactive",
         ModelRequest(
             messages=[
                 ModelMessage(

@@ -101,7 +101,7 @@ def test_quiz_next_generates_reasoning_question_and_caches_pending(tmp_path):
         "concept_id": "k1",
         "question": "Why does a TTL reduce stale-cache risk?",
     }
-    assert router.calls == ["synthesis"]
+    assert router.calls == ["interactive"]
     assert router.requests[0].json_schema is not None
     assert router.requests[0].max_tokens == int(ctx.db.get_tunable("quiz.max_tokens"))
     prompt = router.requests[0].messages[0].content
@@ -249,7 +249,7 @@ def test_quiz_answer_records_failure_and_stores_struggle_not_answer(tmp_path):
         "score_0_100": 40,
         "explanation": "Missed the TTL stale-data bound [claim:c1].",
     }
-    assert router.calls == ["synthesis"]
+    assert router.calls == ["interactive"]
     assert router.requests[0].json_schema is not None
     stats = ctx.db.quiz_stats("k1")
     assert stats["attempts"] == 1

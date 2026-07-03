@@ -132,7 +132,7 @@ def test_teach_endpoint_returns_generated_markdown(study_client):
     assert response.status_code == 200
     assert response.json()["markdown"].startswith("## Explanation")
     assert response.json()["cached"] is False
-    assert router.calls == ["synthesis"]
+    assert router.calls == ["interactive"]
     assert graph.get_concept("k1")["teach_md"].startswith("## Explanation")
 
     # Second call hits the cache — no second model call, and the response
@@ -141,7 +141,7 @@ def test_teach_endpoint_returns_generated_markdown(study_client):
     cached_response = client.get("/api/study/concepts/k1/teach")
     assert cached_response.status_code == 200
     assert cached_response.json()["cached"] is True
-    assert router.calls == ["synthesis"]
+    assert router.calls == ["interactive"]
 
 
 def test_flag_claim_rejects_dirties_clears_cache_and_enqueues(study_client):

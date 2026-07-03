@@ -296,6 +296,17 @@ class OpsDB:
                 "DELETE FROM projects WHERE project_id = ?", (project_id,)
             )
 
+    def delete_source(self, source_id: str, *, project_id: str = DEFAULT_PROJECT_ID) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM chunk_jobs WHERE source_id = ? AND project_id = ?",
+                (source_id, project_id),
+            )
+            self.conn.execute(
+                "DELETE FROM ingest_sources WHERE source_id = ? AND project_id = ?",
+                (source_id, project_id),
+            )
+
     def project_id_for_chunk(self, chunk_id: str) -> str:
         with self._lock:
             row = self.conn.execute(

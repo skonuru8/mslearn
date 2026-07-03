@@ -246,6 +246,23 @@ export function CorpusView() {
     }
   }
 
+  async function onDelete(sourceId: string) {
+    const ok = window.confirm(
+      "Remove this material? Everything the app learned from it will be removed from your course too.",
+    );
+    if (!ok) {
+      return;
+    }
+    try {
+      await api(`/api/corpus/sources/${encodeURIComponent(sourceId)}`, { method: "DELETE" });
+      setExpandedSource(null);
+      await refreshSources();
+      setUserError(null);
+    } catch (err) {
+      captureError(err, "Could not remove that material");
+    }
+  }
+
   async function onSynthesize() {
     setSynthMsg(null);
     try {
@@ -483,6 +500,13 @@ export function CorpusView() {
                       Retry
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => void onDelete(row.source_id)}
+                  >
+                    Remove
+                  </button>
                 </td>
               </tr>
               {expandedSource === row.source_id ? (
