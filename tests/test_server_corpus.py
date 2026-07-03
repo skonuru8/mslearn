@@ -94,6 +94,18 @@ def test_pause_and_resume(client, tiny_pdf):
     assert len(fake_task.delayed) == pending_count
 
 
+def test_resume_clears_stale_error(client, tiny_pdf):
+    c, db, _fake_task = client
+    r = c.post("/api/corpus/sources", json={"ref": str(tiny_pdf), "role": "supplement"})
+    source_id = r.json()["source_id"]
+    db.set_source_status(source_id, "paused", error="failure rate 5/10")
+    assert db.source_row(source_id)["error"] == "failure rate 5/10"
+
+    r = c.post(f"/api/corpus/sources/{source_id}/resume")
+    assert r.status_code == 200
+    assert db.source_row(source_id)["error"] is None
+
+
 def test_pause_resume_unknown_404(client):
     c, _, _ = client
     r = c.post("/api/corpus/sources/nope/pause")
@@ -174,6 +186,24 @@ def test_failures_and_retry_unknown_source_404(client):
     c, _, _ = client
     assert c.get("/api/corpus/sources/nope/failures").status_code == 404
     assert c.post("/api/corpus/sources/nope/retry-failed").status_code == 404
+
+
+def test_upload_over_size_cap_rejected_413(client, monkeypatch):
+    import mslearn.server.routers.corpus as corpus_module
+
+    monkeypatch.setattr(corpus_module, "_MAX_UPLOAD_BYTES", 10)
+    c, db, _task = client
+    r = c.post(
+        "/api/corpus/upload",
+        files={"file": ("toobig.pdf", b"x" * 1000, "application/pdf")},
+        data={"role": "supplement"},
+    )
+    assert r.status_code == 413
+    assert "upload limit" in r.json()["detail"]
+    assert db.all_sources() == []
+    # the partially-written destination file must be cleaned up, not left on disk
+    leftovers = list(Path("data/uploads").glob("*toobig.pdf"))
+    assert leftovers == []
 
 
 def test_upload_unsupported_suffix_rejected(client):

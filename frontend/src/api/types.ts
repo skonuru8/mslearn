@@ -42,6 +42,7 @@ export interface SourceRow {
   total_chunks: number;
   done_chunks: number;
   failed_chunks: number;
+  rejected_chunks: number;
   error: string | null;
   ts: number;
 }

@@ -247,7 +247,7 @@ export function CorpusView() {
                   {row.error ? <div className="hint">{row.error}</div> : null}
                 </td>
                 <td>
-                  {row.done_chunks + row.failed_chunks}/{row.total_chunks}
+                  {row.done_chunks + row.failed_chunks + row.rejected_chunks}/{row.total_chunks}
                   {row.failed_chunks > 0 ? (
                     <>
                       {" "}
@@ -258,6 +258,7 @@ export function CorpusView() {
                   ) : (
                     ""
                   )}
+                  {row.rejected_chunks > 0 ? ` (${row.rejected_chunks} had no trustworthy content)` : ""}
                 </td>
                 <td>
                   {row.status === "paused" ? (

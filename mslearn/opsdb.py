@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS ingest_sources (
     total_chunks INTEGER NOT NULL,
     done_chunks INTEGER NOT NULL DEFAULT 0,
     failed_chunks INTEGER NOT NULL DEFAULT 0,
+    rejected_chunks INTEGER NOT NULL DEFAULT 0,
     error TEXT,
     ts REAL NOT NULL
 );
@@ -107,6 +108,14 @@ class OpsDB:
         if mode != "wal":
             raise RuntimeError(f"WAL mode unavailable for {path}; got journal_mode={mode!r}")
         self.conn.executescript(_SCHEMA)
+        self._ensure_column("ingest_sources", "rejected_chunks", "INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_column(self, table: str, column: str, coltype_and_default: str) -> None:
+        """Guarded `ALTER TABLE ... ADD COLUMN` for databases created before this column existed."""
+        with self._lock, self.conn:
+            cols = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype_and_default}")
 
     def log_model_call(
         self, *, role: str, provider: str, model: str,
@@ -231,8 +240,10 @@ class OpsDB:
                 " attempts = attempts + 1 WHERE chunk_id = ?",
                 (status, error, chunk_id),
             )
-            if row and status in ("done", "failed") and row["status"] not in ("done", "failed"):
-                column = "done_chunks" if status == "done" else "failed_chunks"
+            terminal = ("done", "failed", "rejected")
+            if row and status in terminal and row["status"] not in terminal:
+                column = {"done": "done_chunks", "failed": "failed_chunks",
+                          "rejected": "rejected_chunks"}[status]
                 self.conn.execute(
                     f"UPDATE ingest_sources SET {column} = {column} + 1 WHERE source_id = ?",
                     (row["source_id"],),
@@ -250,10 +261,13 @@ class OpsDB:
     def try_complete_source(self, source_id: str) -> bool:
         """Atomically flip running -> done|failed when all chunks are terminal.
 
-        A source whose chunks ALL failed is honestly reported as `failed`
-        (never `done`) so the UI doesn't lie about a source with zero
-        successful extractions. Returns True exactly once per source, and
-        only when the source completed as `done` — synthesizing after a
+        A source whose chunks ALL failed (infrastructure/model errors) is
+        honestly reported as `failed` (never `done`) so the UI doesn't lie
+        about a source with zero successful extractions. A source whose
+        chunks were all `rejected` by the trust gate (model worked, but
+        found nothing trustworthy) still ends `done` with zero claims — the
+        pipeline behaved correctly. Returns True exactly once per source,
+        and only when the source completed as `done` — synthesizing after a
         fully-failed source is pointless; safe under concurrent workers via
         a single atomic UPDATE.
         """
@@ -265,7 +279,7 @@ class OpsDB:
                 " error = CASE WHEN total_chunks > 0 AND failed_chunks = total_chunks"
                 "   THEN 'all ' || total_chunks || ' chunks failed' ELSE error END"
                 " WHERE source_id = ? AND status = 'running'"
-                " AND done_chunks + failed_chunks >= total_chunks",
+                " AND done_chunks + failed_chunks + rejected_chunks >= total_chunks",
                 (source_id,),
             )
             if cursor.rowcount != 1:
@@ -322,14 +336,25 @@ class OpsDB:
             return ids
 
     def failure_stats(self, source_id) -> dict:
+        """Counts feeding the failure-rate monitor.
+
+        `failed` = infrastructure/model errors, `rejected` = the trust gate
+        correctly declined every claim a chunk produced. The monitor trips
+        on `problems` (both combined) but the UI reports them separately —
+        a high rejection rate is not the same signal as a high error rate.
+        """
         with self._lock:
             row = self.conn.execute(
                 "SELECT count(*) AS total,"
-                " sum(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed"
+                " sum(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,"
+                " sum(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected"
                 " FROM chunk_jobs WHERE source_id = ?",
                 (source_id,),
             ).fetchone()
-        return {"total": row["total"], "failed": row["failed"] or 0}
+        failed = row["failed"] or 0
+        rejected = row["rejected"] or 0
+        return {"total": row["total"], "failed": failed, "rejected": rejected,
+                "problems": failed + rejected}
 
     def record_quiz_result(self, concept_id: str, correct: bool, score: int) -> None:
         with self._lock, self.conn:

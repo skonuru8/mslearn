@@ -85,11 +85,45 @@ def test_failure_monitor_pauses_source(ctx, tmp_path):
     assert db.source_row("s2")["status"] == "paused"
 
 
-def test_persistent_parse_failure_marks_failed(ctx):
+def test_failure_monitor_trips_on_combined_failed_and_rejected(tmp_path):
+    # 5 infra failures + 5 gate rejections = 10/12 problems > 0.5 threshold,
+    # even though neither counter alone crosses it.
+    db = OpsDB(tmp_path / "ops3.db")
+    graph = FakeGraph({f"s3:{i}": {"chunk_id": f"s3:{i}", "source_id": "s3", "text": CHUNK}
+                        for i in range(5, 10)})
+    db.register_source("s3", ref="r", role="spine", total_chunks=12)
+    chunk_ids = [f"s3:{i}" for i in range(12)]
+    db.register_chunk_jobs("s3", chunk_ids)
+    db.set_source_status("s3", "running")
+    router = ScriptedRouter([BAD, BAD, BAD, BAD] * 5)  # plenty of gate-rejection responses
+    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+    for cid in chunk_ids[:5]:  # missing from graph -> genuine failed
+        worker_tasks.extract_chunk_task.delay(cid).get()
+    assert db.source_row("s3")["status"] == "running"  # 5/12 problems, not over threshold yet
+    for cid in chunk_ids[5:10]:  # present in graph, but gate rejects everything -> rejected
+        worker_tasks.extract_chunk_task.delay(cid).get()
+    # Once paused, remaining chunks short-circuit to `skipped_paused` rather
+    # than being processed further — that's existing (correct) behaviour;
+    # what matters here is that failed+rejected together tripped the pause.
+    assert db.source_row("s3")["status"] == "paused"
+    stats = db.failure_stats("s3")
+    assert stats["failed"] == 5
+    assert stats["rejected"] >= 1
+    assert stats["problems"] == stats["failed"] + stats["rejected"]
+
+
+def test_persistent_gate_rejection_marks_rejected_not_failed(ctx):
+    # The model returns well-formed claims, but the trust gate rejects every one
+    # (bad quote match) on every attempt/escalation — the pipeline behaved
+    # correctly, so this must count as `rejected`, not `failed`.
     context = ctx(ScriptedRouter([BAD, BAD, BAD, BAD]))
+    context.db.set_source_status("s1", "running")
     worker_tasks.extract_chunk_task.delay("s1:0").get()
-    assert context.db.failure_stats("s1")["failed"] == 1
+    stats = context.db.failure_stats("s1")
+    assert stats["failed"] == 0
+    assert stats["rejected"] == 1
     assert context.graph.claims == {}
+    assert context.db.source_row("s1")["status"] == "done"  # complete, not falsely "failed"
 
 
 def test_transient_exhaustion_marks_failed(ctx):

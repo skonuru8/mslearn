@@ -15,7 +15,7 @@ def test_source_and_chunk_lifecycle(tmp_path):
     assert d.pending_chunks("s1") == ["s1:2"]
     row = d.source_row("s1")
     assert row["done_chunks"] == 1 and row["failed_chunks"] == 1
-    assert d.failure_stats("s1") == {"total": 3, "failed": 1}
+    assert d.failure_stats("s1") == {"total": 3, "failed": 1, "rejected": 0, "problems": 1}
 
 
 def test_source_status_transitions(tmp_path):
@@ -39,6 +39,18 @@ def test_try_complete_source_fires_once(tmp_path):
     assert d.try_complete_source("s1") is True
     assert d.try_complete_source("s1") is False  # second caller loses the race
     assert d.source_row("s1")["status"] == "done"
+
+
+def test_set_source_status_clear_error(tmp_path):
+    d = db(tmp_path)
+    d.register_source("s1", ref="r", role="supplement", total_chunks=1)
+    d.set_source_status("s1", "paused", error="failure rate 5/10")
+    assert d.source_row("s1")["error"] == "failure rate 5/10"
+    d.set_source_status("s1", "running")  # default COALESCE: stale error survives
+    assert d.source_row("s1")["error"] == "failure rate 5/10"
+    d.set_source_status("s1", "paused", error="failure rate 5/10")
+    d.set_source_status("s1", "running", clear_error=True)
+    assert d.source_row("s1")["error"] is None
 
 
 def test_try_complete_source_all_failed_is_honest(tmp_path):

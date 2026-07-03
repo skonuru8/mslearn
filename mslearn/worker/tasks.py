@@ -17,14 +17,17 @@ def _check_failure_monitor(db, source_id: str) -> None:
     stats = db.failure_stats(source_id)
     min_chunks = int(db.get_tunable("monitor.min_chunks"))
     threshold = db.get_tunable("monitor.failure_rate_threshold")
-    if stats["total"] >= min_chunks and stats["failed"] / stats["total"] > threshold:
-        db.set_source_status(source_id, "paused",
-                             error=f"failure rate {stats['failed']}/{stats['total']}")
+    if stats["total"] >= min_chunks and stats["problems"] / stats["total"] > threshold:
+        db.set_source_status(
+            source_id, "paused",
+            error=f"failure rate {stats['problems']}/{stats['total']}"
+                  f" ({stats['failed']} failed, {stats['rejected']} rejected)",
+        )
 
 
 def _finalize_chunk(ctx, source_id: str, chunk_id: str, status: str, error: str | None = None) -> None:
     ctx.db.mark_chunk(chunk_id, status, error=error)
-    if status == "failed":
+    if status in ("failed", "rejected"):
         _check_failure_monitor(ctx.db, source_id)
     if ctx.db.try_complete_source(source_id):
         synthesize_task.delay()
@@ -73,9 +76,12 @@ def extract_chunk_task(self, chunk_id: str):
             ctx.graph.upsert_claim(record, embedding)
 
     if not accepted and state["rejected"]:
+        # The model produced claims but the trust gate declined every one of
+        # them — the pipeline worked correctly, this is not an error. Mark
+        # `rejected`, not `failed`, so it's counted and reported separately.
         reasons = state["rejected"][0].get("reasons", [])
         error = "; ".join(reasons) if reasons else "claims rejected"
-        _finalize_chunk(ctx, source_id, chunk_id, "failed", error[:500])
+        _finalize_chunk(ctx, source_id, chunk_id, "rejected", error[:500])
         return
 
     error = f"{len(state['rejected'])} claims rejected" if state["rejected"] else None

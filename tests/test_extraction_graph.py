@@ -91,6 +91,27 @@ def test_parse_error_exhausted_escalates_with_rejects(tmp_path):
     assert state["error"] is None
 
 
+def test_accepted_claims_not_duplicated_across_retries(tmp_path):
+    # Attempt 1: one good claim + one bad (gets rejected, triggers a retry).
+    # Attempt 2: the model re-emits the same good claim (common LLM behaviour
+    # on a retry prompt). It must not be re-validated/duplicated in `accepted`.
+    one_good_one_bad = {"claims": [
+        {"text": "Cache invalidation is hard.", "stance": "neutral",
+         "quote": "Cache invalidation is one of the two hard problems"},
+        {"text": "Bananas are yellow.", "stance": "neutral",
+         "quote": "this text does not appear anywhere at all"},
+    ]}
+    retry_repeats_the_good_one = {"claims": [
+        {"text": "Cache invalidation is hard.", "stance": "neutral",
+         "quote": "Cache invalidation is one of the two hard problems"},
+    ]}
+    router = ScriptedRouter([one_good_one_bad, retry_repeats_the_good_one])
+    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    assert [d.text for d in state["accepted"]] == ["Cache invalidation is hard."]
+    assert state["rejected"] == []
+    assert router.calls == ["extraction", "extraction"]
+
+
 def test_extraction_request_uses_max_tokens_tunable(tmp_path):
     class RecordingRouter(ScriptedRouter):
         def __init__(self, outputs):

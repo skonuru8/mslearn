@@ -1,5 +1,4 @@
 import re
-import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -31,7 +30,16 @@ class DomainProfileUpdate(BaseModel):
 
 @contextmanager
 def _local_eager():
-    """Run Celery tasks inline when local=true (dev/tests); production uses workers."""
+    """Run Celery tasks inline when local=true.
+
+    NOTE: this mutates the process-global `celery_app.conf.task_always_eager`
+    for the duration of the request, which is racy under concurrent requests
+    (request B enqueues while A holds eager=True -> B's tasks run inline too,
+    or A restores False mid-B). `local=true` is intended for tests and the
+    CLI (single-threaded, one request/process at a time) only — the primary
+    UI no longer offers it (background ingestion is the default; see
+    scripts/dev_up.sh / `make run` for the worker + API processes).
+    """
     prev = celery_app.conf.task_always_eager
     celery_app.conf.task_always_eager = True
     try:
@@ -66,11 +74,33 @@ def create_source(body: IngestRequest, ctx=Depends(get_ctx)):
 _UPLOAD_SUFFIXES = frozenset(
     {".pdf", ".epub", ".html", ".htm", ".mp3", ".m4a", ".wav", ".flac", ".ogg"}
 )
+_MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB — a multi-GB upload must not fill the disk
 
 
 def _upload_dir(ctx) -> Path:
     data_dir = getattr(getattr(ctx, "settings", None), "data_dir", None) or Path("data")
     return Path(data_dir) / "uploads"
+
+
+def _copy_with_size_cap(src, dest: Path, max_bytes: int) -> None:
+    """Stream-copy `src` into `dest`, aborting with a 413 if it exceeds `max_bytes`."""
+    total = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"file exceeds the {max_bytes // (1024 * 1024)} MB upload limit",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
 
 
 @router.post("/upload")
@@ -91,8 +121,7 @@ def upload_source(
     dest_dir = _upload_dir(ctx)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{int(time.time())}-{stem}{suffix}"
-    with dest.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    _copy_with_size_cap(file.file, dest, _MAX_UPLOAD_BYTES)
 
     try:
         if local:
@@ -122,7 +151,10 @@ def pause_source(source_id: str, ctx=Depends(get_ctx)):
 def resume_source(source_id: str, ctx=Depends(get_ctx)):
     if ctx.db.source_row(source_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
-    ctx.db.set_source_status(source_id, "running")
+    # clear_error=True: set_source_status normally COALESCEs and keeps the old
+    # error, which would otherwise survive a resume (e.g. a stale pause
+    # reason showing on a source that's running fine again).
+    ctx.db.set_source_status(source_id, "running", clear_error=True)
     resumed = resume_pending()
     return {"source_id": source_id, "status": "running", "resumed_chunks": resumed}
 
