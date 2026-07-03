@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { CitationRow } from "../api/types";
 import { citationMap, renderWithCitations } from "./citations";
@@ -30,28 +31,28 @@ function CitationBody({ text, citations = [] }: Props) {
   );
 }
 
+function mapChildren(children: ReactNode, citations: CitationRow[]): ReactNode {
+  if (typeof children === "string") {
+    return <CitationBody text={children} citations={citations} />;
+  }
+  if (Array.isArray(children)) {
+    return children.map((child, index) =>
+      typeof child === "string" ? (
+        <CitationBody key={index} text={child} citations={citations} />
+      ) : (
+        child
+      ),
+    );
+  }
+  return children;
+}
+
 export function MarkdownWithCitations({ text, citations = [] }: Props) {
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => (
-          <p>
-            {typeof children === "string" ? (
-              <CitationBody text={children} citations={citations} />
-            ) : (
-              children
-            )}
-          </p>
-        ),
-        li: ({ children }) => (
-          <li>
-            {typeof children === "string" ? (
-              <CitationBody text={children} citations={citations} />
-            ) : (
-              children
-            )}
-          </li>
-        ),
+        p: ({ children }) => <p>{mapChildren(children, citations)}</p>,
+        li: ({ children }) => <li>{mapChildren(children, citations)}</li>,
       }}
     >
       {text}

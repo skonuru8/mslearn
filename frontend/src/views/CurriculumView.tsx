@@ -15,8 +15,11 @@ export function CurriculumView() {
       try {
         const rows = await api<ConceptMeta[]>("/api/study/curriculum");
         setConcepts(rows);
+        setError(null);
+        // Conflict badges are best-effort: one failing concept must not
+        // blank the whole list.
         const counts: Record<string, number> = {};
-        await Promise.all(
+        const results = await Promise.allSettled(
           rows.map(async (concept) => {
             const detail = await api<{ conflicts: unknown[] }>(
               `/api/study/concepts/${encodeURIComponent(concept.concept_id)}`,
@@ -24,8 +27,8 @@ export function CurriculumView() {
             counts[concept.concept_id] = detail.conflicts.length;
           }),
         );
+        void results;
         setConflictCounts(counts);
-        setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load curriculum");
       } finally {

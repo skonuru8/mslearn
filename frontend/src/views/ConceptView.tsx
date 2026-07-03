@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
 import { api } from "../api/client";
 import type { ConceptDetail, TeachResponse } from "../api/types";
 import { MarkdownWithCitations } from "../components/MarkdownWithCitations";
@@ -16,6 +15,7 @@ export function ConceptView() {
 
   const load = useCallback(async (force = false) => {
     setLoading(true);
+    const requestedId = id;
     try {
       const [conceptDetail, teach] = await Promise.all([
         api<ConceptDetail>(`/api/study/concepts/${encodeURIComponent(id)}`),
@@ -23,6 +23,9 @@ export function ConceptView() {
           `/api/study/concepts/${encodeURIComponent(id)}/teach${force ? "?force=true" : ""}`,
         ),
       ]);
+      if (requestedId !== id) {
+        return; // stale response after navigation
+      }
       setDetail(conceptDetail);
       setMarkdown(teach.markdown);
       setError(null);
@@ -34,6 +37,8 @@ export function ConceptView() {
   }, [id]);
 
   useEffect(() => {
+    setDetail(null);
+    setMarkdown("");
     void load();
   }, [load]);
 
@@ -54,8 +59,19 @@ export function ConceptView() {
     }
   }
 
-  if (loading || !detail) {
-    return <Loading />;
+  if (!detail) {
+    if (loading) {
+      return <Loading />;
+    }
+    return (
+      <section className="panel">
+        <h1>Concept</h1>
+        <ErrorBanner message={error ?? "Concept failed to load"} />
+        <button type="button" onClick={() => void load()}>
+          Retry
+        </button>
+      </section>
+    );
   }
 
   const { main, tension } = splitTeachMarkdown(markdown);
@@ -73,7 +89,7 @@ export function ConceptView() {
       <MarkdownWithCitations text={main} citations={detail.citations} />
       {tension ? (
         <div className="tension">
-          <ReactMarkdown>{tension}</ReactMarkdown>
+          <MarkdownWithCitations text={tension} citations={detail.citations} />
         </div>
       ) : null}
 

@@ -43,3 +43,16 @@ describe("api", () => {
     expect(await api("/api/corpus/sources").catch((e) => e)).toBeInstanceOf(ApiError);
   });
 });
+
+describe("error frames and malformed payloads", () => {
+  it("skips malformed frames instead of throwing", () => {
+    const input = 'data: {not json}\n\ndata: {"delta":"ok"}\n\n';
+    const { frames } = parseSseBuffer(input);
+    expect(frames).toEqual([{ delta: "ok" }]);
+  });
+
+  it("parses error frames", () => {
+    const { frames } = parseSseBuffer('data: {"error":"backend fell over"}\n\n');
+    expect(frames).toEqual([{ error: "backend fell over" }]);
+  });
+});

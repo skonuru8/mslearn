@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from mslearn.pipeline.qa import retrieve
 from mslearn.prompts import get_prompt
-from mslearn.providers.base import ModelMessage, ModelRequest
+from mslearn.providers.base import ModelMessage, ModelRequest, ProviderError
 from mslearn.server.deps import get_ctx
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -33,10 +33,16 @@ def chat(body: ChatRequest, ctx=Depends(get_ctx)):
 
     def events():
         answer_parts: list[str] = []
-        for delta in ctx.router.stream("interactive", request):
-            text = str(delta)
-            answer_parts.append(text)
-            yield _sse({"delta": text})
+        try:
+            for delta in ctx.router.stream("interactive", request):
+                text = str(delta)
+                answer_parts.append(text)
+                yield _sse({"delta": text})
+        except ProviderError as exc:
+            # The HTTP 200 is already committed once streaming starts; the only
+            # way to signal failure is an in-band frame the client can render.
+            yield _sse({"error": str(exc)[:300]})
+            return
         answer = "".join(answer_parts)
         citations = _claim_ids(answer)
         yield _sse({"done": True, "citations": citations})

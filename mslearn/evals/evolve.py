@@ -51,6 +51,23 @@ class OverlayOpsDB:
         return getattr(self._base, name)
 
 
+def _lower_is_better(metric: str) -> bool:
+    op, _threshold = GATES.get(metric, (">=", 0.0))
+    return op in ("<=", "==")
+
+
+def _improved(metric: str, after: float, before: float) -> bool:
+    if _lower_is_better(metric):
+        return after < before
+    return after > before
+
+
+def _not_regressed(metric: str, after: float, before: float) -> bool:
+    if _lower_is_better(metric):
+        return after <= before
+    return after >= before
+
+
 def required_placeholders(name: str) -> set[str]:
     base = PROMPTS.get(name, "")
     return set(_PLACEHOLDER_RE.findall(base))
@@ -68,7 +85,10 @@ def validate_proposal(proposal: dict) -> str | None:
         if key not in TUNABLE_BOUNDS:
             return f"unknown tunable {key!r}"
         low, high = TUNABLE_BOUNDS[key]
-        value = float(proposal.get("value"))
+        try:
+            value = float(proposal.get("value"))
+        except (TypeError, ValueError):
+            return f"invalid or missing value {proposal.get('value')!r}"
         if not (low <= value <= high):
             return f"value {value} outside bounds [{low}, {high}]"
         return None
@@ -148,9 +168,11 @@ def evolve_once(ctx) -> dict:
             )
         shadow_metrics = compute_component_metrics(shadow_ctx)
         shadow_metrics["provenance.violations"] = 0.0
-        target_improved = shadow_metrics.get(target, 0) > baseline.get(target, 0)
+        target_improved = _improved(
+            target, shadow_metrics.get(target, 0.0), baseline.get(target, 0.0)
+        )
         gates_ok = all(
-            shadow_metrics.get(metric, 0) >= baseline.get(metric, 0)
+            _not_regressed(metric, shadow_metrics.get(metric, 0.0), baseline[metric])
             for metric in GATES
             if metric in baseline
         )

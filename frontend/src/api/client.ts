@@ -53,7 +53,11 @@ export function parseSseBuffer(buffer: string): { frames: ChatFrame[]; rest: str
       continue;
     }
     const payload = line.slice("data: ".length);
-    frames.push(JSON.parse(payload) as ChatFrame);
+    try {
+      frames.push(JSON.parse(payload) as ChatFrame);
+    } catch {
+      // malformed frame (e.g. truncated at connection drop) — skip, keep stream alive
+    }
   }
 
   return { frames, rest };
@@ -64,11 +68,13 @@ export async function streamChat(
   sessionId: string,
   onDelta: (delta: string) => void,
   onDone: (citations: string[]) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, session_id: sessionId }),
+    signal,
   });
 
   if (!response.ok) {
@@ -101,22 +107,54 @@ export async function streamChat(
     const parsed = parseSseBuffer(buffer);
     buffer = parsed.rest;
     for (const frame of parsed.frames) {
-      if ("delta" in frame) {
-        onDelta(frame.delta);
-      } else if ("done" in frame && frame.done) {
-        onDone(frame.citations);
-      }
+      handleFrame(frame, onDelta, onDone);
     }
   }
 
   if (buffer.trim()) {
     const parsed = parseSseBuffer(`${buffer}\n\n`);
     for (const frame of parsed.frames) {
-      if ("delta" in frame) {
-        onDelta(frame.delta);
-      } else if ("done" in frame && frame.done) {
-        onDone(frame.citations);
-      }
+      handleFrame(frame, onDelta, onDone);
     }
   }
+}
+
+function handleFrame(
+  frame: ChatFrame,
+  onDelta: (delta: string) => void,
+  onDone: (citations: string[]) => void,
+): void {
+  if ("error" in frame) {
+    throw new ApiError(frame.error, 502);
+  }
+  if ("delta" in frame) {
+    onDelta(frame.delta);
+  } else if ("done" in frame && frame.done) {
+    onDone(frame.citations);
+  }
+}
+
+export async function uploadSource(
+  file: File,
+  role: string,
+  local: boolean,
+): Promise<{ source_id: string; stored_path: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("role", role);
+  form.append("local", String(local));
+  const response = await fetch("/api/corpus/upload", { method: "POST", body: form });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = (await response.json()) as { detail?: string };
+      if (body.detail) {
+        detail = body.detail;
+      }
+    } catch {
+      // keep statusText
+    }
+    throw new ApiError(detail, response.status);
+  }
+  return (await response.json()) as { source_id: string; stored_path: string };
 }

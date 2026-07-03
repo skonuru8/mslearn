@@ -154,7 +154,11 @@ export interface ChatDoneFrame {
   citations: string[];
 }
 
-export type ChatFrame = ChatDeltaFrame | ChatDoneFrame;
+export interface ChatErrorFrame {
+  error: string;
+}
+
+export type ChatFrame = ChatDeltaFrame | ChatDoneFrame | ChatErrorFrame;
 
 export interface ChatSessionTurn {
   question: string;

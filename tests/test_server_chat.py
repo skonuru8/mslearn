@@ -154,3 +154,29 @@ def test_chat_session_endpoint_returns_last_ten_turns(tmp_path):
     assert len(turns) == 10
     assert [turn["question"] for turn in turns] == [f"question {index}" for index in range(2, 12)]
     assert turns[-1]["answer"] == "ok"
+
+
+def test_mid_stream_provider_error_emits_error_frame(tmp_path):
+    from mslearn.providers.base import ProviderError
+
+    class ExplodingStreamRouter(ScriptedRouter):
+        def stream(self, role, request):
+            yield "partial "
+            raise ProviderError("backend fell over")
+
+    router = ExplodingStreamRouter([])
+    ctx = make_chat_ctx(tmp_path, router)
+    app = create_app(context=ctx)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/chat", json={"question": "What is a TTL?", "session_id": "s-err"}
+        )
+        assert response.status_code == 200
+        frames = [
+            json.loads(line[len("data: "):])
+            for line in response.text.split("\n\n")
+            if line.startswith("data: ")
+        ]
+    assert {"delta": "partial "} in frames
+    assert any("error" in frame and "backend fell over" in frame["error"] for frame in frames)
+    assert not any(frame.get("done") for frame in frames)

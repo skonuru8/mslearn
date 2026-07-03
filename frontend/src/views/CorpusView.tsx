@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api/client";
+import { api, uploadSource } from "../api/client";
 import type {
   DomainProfileResponse,
   IngestResponse,
@@ -18,6 +18,8 @@ export function CorpusView() {
   const [role, setRole] = useState("spine");
   const [sourceType, setSourceType] = useState("");
   const [local, setLocal] = useState(true);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,6 +67,25 @@ export function CorpusView() {
     }
   }
 
+  async function onUpload(event: FormEvent) {
+    event.preventDefault();
+    if (!uploadFile) {
+      setError("Choose a file first");
+      return;
+    }
+    setUploading(true);
+    try {
+      await uploadSource(uploadFile, role, local);
+      setUploadFile(null);
+      await load();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function setStatus(sourceId: string, action: "pause" | "resume") {
     try {
       await api(`/api/corpus/sources/${encodeURIComponent(sourceId)}/${action}`, {
@@ -108,9 +129,23 @@ export function CorpusView() {
       <h1>Corpus</h1>
       <ErrorBanner message={error} />
 
+      <form className="form-grid" onSubmit={(event) => void onUpload(event)}>
+        <label>
+          Upload a file from this computer (pdf, epub, html, audio)
+          <input
+            type="file"
+            accept=".pdf,.epub,.html,.htm,.mp3,.m4a,.wav,.flac,.ogg"
+            onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        <button type="submit" className="primary" disabled={!uploadFile || uploading}>
+          {uploading ? "Uploading…" : "Upload & ingest"}
+        </button>
+      </form>
+
       <form className="form-grid" onSubmit={(event) => void onSubmit(event)}>
         <label>
-          Source ref (path or URL)
+          Or source ref (URL — blog post, YouTube — or server path)
           <input value={ref} onChange={(event) => setRef(event.target.value)} required />
         </label>
         <label>

@@ -1,6 +1,10 @@
+import re
+import shutil
+import time
 from contextlib import contextmanager
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from mslearn.pipeline.orchestrator import IngestError, ingest_source, resume_pending
@@ -57,6 +61,48 @@ def create_source(body: IngestRequest, ctx=Depends(get_ctx)):
     except IngestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     return {"source_id": source_id}
+
+
+_UPLOAD_SUFFIXES = frozenset(
+    {".pdf", ".epub", ".html", ".htm", ".mp3", ".m4a", ".wav", ".flac", ".ogg"}
+)
+
+
+def _upload_dir(ctx) -> Path:
+    data_dir = getattr(getattr(ctx, "settings", None), "data_dir", None) or Path("data")
+    return Path(data_dir) / "uploads"
+
+
+@router.post("/upload")
+def upload_source(
+    file: UploadFile = File(...),
+    role: str = Form("supplement"),
+    local: bool = Form(False),
+    ctx=Depends(get_ctx),
+):
+    original = Path(file.filename or "upload").name
+    suffix = Path(original).suffix.lower()
+    if suffix not in _UPLOAD_SUFFIXES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported file type {suffix!r}; allowed: {sorted(_UPLOAD_SUFFIXES)}",
+        )
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(original).stem).strip("-") or "upload"
+    dest_dir = _upload_dir(ctx)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{int(time.time())}-{stem}{suffix}"
+    with dest.open("wb") as out:
+        shutil.copyfileobj(file.file, out)
+
+    try:
+        if local:
+            with _local_eager():
+                source_id = ingest_source(str(dest), role=role, enqueue=True)
+        else:
+            source_id = ingest_source(str(dest), role=role, enqueue=True)
+    except IngestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return {"source_id": source_id, "stored_path": str(dest)}
 
 
 @router.get("/sources")

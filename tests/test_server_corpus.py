@@ -125,3 +125,29 @@ def test_domain_profile_invalid_422(client):
         json={"profile": "nope"},
     )
     assert r.status_code == 422
+
+
+def test_upload_html_file(client):
+    c, db, fake_task = client
+    html = Path("tests/fixtures/blog.html").read_bytes()
+    r = c.post(
+        "/api/corpus/upload",
+        files={"file": ("my post.html", html, "text/html")},
+        data={"role": "supplement", "local": "false"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert db.source_row(body["source_id"])["status"] == "running"
+    assert body["stored_path"].endswith(".html")
+    assert Path(body["stored_path"]).exists()
+
+
+def test_upload_unsupported_suffix_rejected(client):
+    c, _db, _task = client
+    r = c.post(
+        "/api/corpus/upload",
+        files={"file": ("notes.docx", b"zzz", "application/octet-stream")},
+        data={"role": "supplement"},
+    )
+    assert r.status_code == 422
+    assert "unsupported file type" in r.json()["detail"]

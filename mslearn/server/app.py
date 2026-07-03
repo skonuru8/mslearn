@@ -43,5 +43,19 @@ def create_app(context: PipelineContext | None = None) -> FastAPI:
     app.include_router(evals.router)
     dist = Path("frontend") / "dist"
     if dist.exists():
-        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
+        app.mount("/", _SPAStaticFiles(directory=dist, html=True), name="frontend")
     return app
+
+
+class _SPAStaticFiles(StaticFiles):
+    """Serve index.html for unknown non-API paths so client-side routes survive refresh."""
+
+    async def get_response(self, path: str, scope):
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and not path.startswith("api"):
+                return await super().get_response("index.html", scope)
+            raise

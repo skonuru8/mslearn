@@ -67,3 +67,25 @@ def test_evolve_rejects_invalid_proposal(tmp_path, monkeypatch):
         summary = evolve_once(ctx)
     assert summary["accepted"] == []
     assert summary["rejected"]
+
+
+def test_direction_aware_improvement_and_regression():
+    from mslearn.evals.evolve import _improved, _not_regressed
+
+    # higher-is-better metric
+    assert _improved("extraction.recall", 0.9, 0.8)
+    assert not _improved("extraction.recall", 0.8, 0.9)
+    # lower-is-better metric: a DECREASE is the improvement
+    assert _improved("grounding.false_accept", 0.01, 0.05)
+    assert not _improved("grounding.false_accept", 0.05, 0.01)
+    # regression checks respect gate direction
+    assert _not_regressed("grounding.false_accept", 0.01, 0.02)
+    assert not _not_regressed("grounding.false_accept", 0.05, 0.02)
+    assert _not_regressed("clustering.f1", 0.85, 0.85)
+
+
+def test_validate_proposal_missing_value_rejected_not_crash():
+    from mslearn.evals.evolve import validate_proposal
+
+    error = validate_proposal({"kind": "tunable", "key": "trust.quote_threshold"})
+    assert error is not None and "invalid or missing value" in error

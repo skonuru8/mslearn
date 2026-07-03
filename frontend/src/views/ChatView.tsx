@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { streamChat } from "../api/client";
 import { ErrorBanner } from "../components/Status";
 
@@ -27,6 +27,13 @@ export function ChatView() {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sid = useMemo(() => sessionId(), []);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort(); // cancel in-flight stream on unmount
+    };
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -59,6 +66,8 @@ export function ChatView() {
     setStreaming(true);
     setMessages((prev) => [...prev, { role: "user", content: question }, { role: "assistant", content: "" }]);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       await streamChat(
         question,
@@ -83,10 +92,21 @@ export function ChatView() {
             return copy.slice(-20);
           });
         },
+        controller.signal,
       );
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return; // unmount/navigation — no error UI
+      }
       setError(err instanceof Error ? err.message : "Chat failed");
-      setMessages((prev) => prev.slice(0, -1));
+      // Keep any partial streamed content; drop only an empty assistant bubble.
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant" && last.content === "") {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
     } finally {
       setStreaming(false);
     }
