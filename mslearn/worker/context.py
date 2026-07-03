@@ -1,4 +1,7 @@
+import logging
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 _context = None
 
@@ -9,6 +12,7 @@ class PipelineContext:
     db: object
     router: object
     graph: object
+    memory: object | None = None
 
 
 def set_context(context: PipelineContext) -> None:
@@ -33,4 +37,11 @@ def build_default_context() -> PipelineContext:
     db = OpsDB(settings.ops_db)
     router = ModelRouter(load_profiles(settings.profiles_path), db, settings)
     graph = GraphStore(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
-    return PipelineContext(settings=settings, db=db, router=router, graph=graph)
+    memory = None
+    try:
+        from mslearn.memory.mem0_impl import Mem0Memory
+
+        memory = Mem0Memory(settings, db)
+    except ImportError:
+        logger.warning("mem0 not installed; learner memory disabled")
+    return PipelineContext(settings=settings, db=db, router=router, graph=graph, memory=memory)

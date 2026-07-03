@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import math
+import time
+import uuid
 
 from mslearn.graph.records import ConceptRecord, validate_classification
+from mslearn.memory.base import MemoryItem
 
 
 class InMemoryGraphStore:
@@ -243,6 +246,34 @@ class InMemoryGraphStore:
             rows.append(row)
         rows.sort(key=lambda r: (-r["score"], r["claim_id"]))
         return rows[:k]
+
+
+class InMemoryLearnerMemory:
+    def __init__(self) -> None:
+        self._items: list[MemoryItem] = []
+
+    def add(self, text: str, category: str) -> str:
+        memory_id = str(uuid.uuid4())
+        self._items.append(
+            MemoryItem(
+                memory_id=memory_id,
+                text=text,
+                category=category,
+                created_at=time.time(),
+            )
+        )
+        return memory_id
+
+    def search(self, query: str, k: int = 5) -> list[MemoryItem]:
+        needle = query.lower()
+        hits = [item for item in self._items if needle in item.text.lower()]
+        return hits[:k]
+
+    def all(self) -> list[MemoryItem]:
+        return list(self._items)
+
+    def delete(self, memory_id: str) -> None:
+        self._items = [item for item in self._items if item.memory_id != memory_id]
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
