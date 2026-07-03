@@ -12,20 +12,20 @@ DECK_ID = 1607392319
 MODEL_ID = 1607392320
 
 
-def export_markdown(ctx, out_dir: Path | str) -> list[Path]:
+def export_markdown(ctx, out_dir: Path | str, project_id: str = "default") -> list[Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     paths: list[Path] = []
     index_lines = ["# mslearn Export", ""]
-    for index, concept in enumerate(_curriculum(ctx.graph)):
+    for index, concept in enumerate(_curriculum(ctx.graph, project_id)):
         filename = f"{index:03d}-{_slug(concept['name'])}.md"
         path = out_dir / filename
-        teach_md = ctx.graph.get_concept(concept["concept_id"]).get("teach_md", "")
+        teach_md = ctx.graph.get_concept(concept["concept_id"], project_id=project_id).get("teach_md", "")
         if teach_md:
             content = teach_md.rstrip() + "\n"
         else:
-            content = _render_concept_markdown(ctx.graph, concept)
+            content = _render_concept_markdown(ctx.graph, concept, project_id)
         path.write_text(content)
         paths.append(path)
         index_lines.append(f"- [{concept['name']}]({filename})")
@@ -36,7 +36,7 @@ def export_markdown(ctx, out_dir: Path | str) -> list[Path]:
     return paths
 
 
-def export_anki(ctx, out_path: Path | str) -> Path:
+def export_anki(ctx, out_path: Path | str, project_id: str = "default") -> Path:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -53,17 +53,17 @@ def export_anki(ctx, out_path: Path | str) -> Path:
         ],
     )
     deck = genanki.Deck(DECK_ID, "mslearn")
-    for concept in _curriculum(ctx.graph):
+    for concept in _curriculum(ctx.graph, project_id):
         concept_id = concept["concept_id"]
-        claims = _claims(ctx.graph, concept_id)
+        claims = _claims(ctx.graph, concept_id, project_id)
         front = f"Explain: {concept['name']}"
         back = _anki_explanation_back(concept, claims)
         deck.add_note(_note(model, front, back, f"concept:{concept_id}"))
 
         claim_by_id = {claim["claim_id"]: claim for claim in claims}
-        for conflict in ctx.graph.conflicts_in_concept(concept_id):
+        for conflict in ctx.graph.conflicts_in_concept(concept_id, project_id=project_id):
             front = f"Where do sources disagree on {concept['name']}?"
-            back = _anki_conflict_back(conflict, claim_by_id, ctx.graph)
+            back = _anki_conflict_back(conflict, claim_by_id, ctx.graph, project_id)
             deck.add_note(
                 _note(
                     model,
@@ -77,10 +77,10 @@ def export_anki(ctx, out_path: Path | str) -> Path:
     return out_path
 
 
-def export_graph(ctx, out_dir: Path | str) -> list[Path]:
+def export_graph(ctx, out_dir: Path | str, project_id: str = "default") -> list[Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    nodes, rels = ctx.graph.export_all()
+    nodes, rels = ctx.graph.export_all(project_id=project_id)
     graphml_path = out_dir / "graph.graphml"
     json_path = out_dir / "graph.json"
     write_graphml(nodes, rels, graphml_path)
@@ -88,17 +88,20 @@ def export_graph(ctx, out_dir: Path | str) -> list[Path]:
     return [graphml_path, json_path]
 
 
-def _curriculum(graph) -> list[dict]:
-    concepts = graph.curriculum()
+def _curriculum(graph, project_id: str = "default") -> list[dict]:
+    concepts = graph.curriculum(project_id=project_id)
     if concepts:
         return concepts
-    return sorted(graph.all_concepts(), key=lambda row: (row.get("order_index") is None, row["concept_id"]))
+    return sorted(
+        graph.all_concepts(project_id=project_id),
+        key=lambda row: (row.get("order_index") is None, row["concept_id"]),
+    )
 
 
-def _render_concept_markdown(graph, concept: dict) -> str:
+def _render_concept_markdown(graph, concept: dict, project_id: str = "default") -> str:
     concept_id = concept["concept_id"]
-    claims = _claims(graph, concept_id)
-    citations = _citation_map(graph, claims)
+    claims = _claims(graph, concept_id, project_id)
+    citations = _citation_map(graph, claims, project_id)
     lines = [
         f"# {concept['name']}",
         "",
@@ -116,7 +119,7 @@ def _render_concept_markdown(graph, concept: dict) -> str:
     else:
         lines.append("- No trusted claims available.")
 
-    conflicts = graph.conflicts_in_concept(concept_id)
+    conflicts = graph.conflicts_in_concept(concept_id, project_id=project_id)
     if conflicts:
         lines.extend(["", "## Conflicts", ""])
         claim_by_id = {claim["claim_id"]: claim for claim in claims}
@@ -137,16 +140,20 @@ def _render_concept_markdown(graph, concept: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _claims(graph, concept_id: str) -> list[dict]:
+def _claims(graph, concept_id: str, project_id: str = "default") -> list[dict]:
     return [
         claim
-        for claim in graph.claims_in_concept(concept_id)
+        for claim in graph.claims_in_concept(concept_id, project_id=project_id)
         if claim.get("trust", "trusted") in {"trusted", "escalated"}
     ]
 
 
-def _citation_map(graph, claims: list[dict]) -> dict[str, dict]:
-    rows = graph.citations_for_claims([claim["claim_id"] for claim in claims])
+def _citation_map(
+    graph, claims: list[dict], project_id: str = "default"
+) -> dict[str, dict]:
+    rows = graph.citations_for_claims(
+        [claim["claim_id"] for claim in claims], project_id=project_id
+    )
     return {
         row["claim_id"]: {**row, "number": index}
         for index, row in enumerate(rows, start=1)
@@ -189,7 +196,9 @@ def _anki_explanation_back(concept: dict, claims: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _anki_conflict_back(conflict: dict, claim_by_id: dict[str, dict], graph) -> str:
+def _anki_conflict_back(
+    conflict: dict, claim_by_id: dict[str, dict], graph, project_id: str = "default"
+) -> str:
     citations = _citation_map(
         graph,
         [
@@ -197,6 +206,7 @@ def _anki_conflict_back(conflict: dict, claim_by_id: dict[str, dict], graph) -> 
             for claim_id in (conflict["claim_a"], conflict["claim_b"])
             if claim_id in claim_by_id
         ],
+        project_id,
     )
     lines = [
         f"{html.escape(conflict['classification'])}: {html.escape(conflict['rationale'])}",

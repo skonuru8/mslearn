@@ -34,7 +34,7 @@ class NoDelayTask:
     def __init__(self):
         self.count = 0
 
-    def delay(self):
+    def delay(self, project_id="default"):
         self.count += 1
 
 

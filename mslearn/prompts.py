@@ -160,5 +160,5 @@ def domain_guidance(profile: str) -> str:
     raise KeyError(f"unknown domain profile {profile!r}")
 
 
-def get_domain_profile(db: OpsDB) -> str:
-    return db.get_setting("corpus.domain_profile", "technical")
+def get_domain_profile(db: OpsDB, project_id: str = "default") -> str:
+    return db.get_project_setting(project_id, "corpus.domain_profile", "technical") or "technical"

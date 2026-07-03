@@ -13,8 +13,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_USER_ID = "learner"
-
 
 class Mem0Memory:
     def __init__(self, settings: Settings, db: OpsDB) -> None:
@@ -74,10 +72,10 @@ class Mem0Memory:
             created_at=created_at,
         )
 
-    def add(self, text: str, category: str) -> str:
+    def add(self, text: str, category: str, project_id: str = "default") -> str:
         result = self._ensure_client().add(
             text,
-            user_id=_USER_ID,
+            user_id=f"learner:{project_id}",
             metadata={"category": category},
         )
         rows = result.get("results") if isinstance(result, dict) else result
@@ -90,18 +88,18 @@ class Mem0Memory:
             return str(first.get("id", ""))
         return str(first)
 
-    def search(self, query: str, k: int = 5) -> list[MemoryItem]:
+    def search(self, query: str, k: int = 5, project_id: str = "default") -> list[MemoryItem]:
         result = self._ensure_client().search(
             query,
             top_k=k,
-            filters={"user_id": _USER_ID},
+            filters={"user_id": f"learner:{project_id}"},
         )
         rows = result.get("results", []) if isinstance(result, dict) else result
         return [self._to_item(row) for row in rows]
 
-    def all(self) -> list[MemoryItem]:
+    def all(self, project_id: str = "default") -> list[MemoryItem]:
         result = self._ensure_client().get_all(
-            filters={"user_id": _USER_ID},
+            filters={"user_id": f"learner:{project_id}"},
             top_k=1000,
         )
         rows = result.get("results", []) if isinstance(result, dict) else result

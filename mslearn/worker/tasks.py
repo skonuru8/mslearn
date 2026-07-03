@@ -19,18 +19,21 @@ def _check_failure_monitor(db, source_id: str) -> None:
     threshold = db.get_tunable("monitor.failure_rate_threshold")
     if stats["total"] >= min_chunks and stats["problems"] / stats["total"] > threshold:
         db.set_source_status(
-            source_id, "paused",
+            source_id,
+            "paused",
             error=f"failure rate {stats['problems']}/{stats['total']}"
-                  f" ({stats['failed']} failed, {stats['rejected']} rejected)",
+            f" ({stats['failed']} failed, {stats['rejected']} rejected)",
         )
 
 
-def _finalize_chunk(ctx, source_id: str, chunk_id: str, status: str, error: str | None = None) -> None:
+def _finalize_chunk(
+    ctx, project_id: str, source_id: str, chunk_id: str, status: str, error: str | None = None
+) -> None:
     ctx.db.mark_chunk(chunk_id, status, error=error)
     if status in ("failed", "rejected"):
         _check_failure_monitor(ctx.db, source_id)
     if ctx.db.try_complete_source(source_id):
-        synthesize_task.delay()
+        synthesize_task.delay(project_id)
 
 
 @app.task(
@@ -39,18 +42,18 @@ def _finalize_chunk(ctx, source_id: str, chunk_id: str, status: str, error: str 
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def extract_chunk_task(self, chunk_id: str):
+def extract_chunk_task(self, project_id: str, chunk_id: str):
     ctx = get_context()
     source_id = chunk_id.rsplit(":", 1)[0]
 
-    source = ctx.db.source_row(source_id)
+    source = ctx.db.source_row(source_id, project_id=project_id)
     if source is not None and source["status"] == "paused":
         ctx.db.mark_chunk(chunk_id, "skipped_paused")
         return
 
-    chunk = ctx.graph.get_chunk(chunk_id)
+    chunk = ctx.graph.get_chunk(chunk_id, project_id=project_id)
     if chunk is None:
-        _finalize_chunk(ctx, source_id, chunk_id, "failed", "chunk not found in graph")
+        _finalize_chunk(ctx, project_id, source_id, chunk_id, "failed", "chunk not found in graph")
         return
 
     try:
@@ -58,11 +61,16 @@ def extract_chunk_task(self, chunk_id: str):
     except ProviderTransientError as exc:
         if self.request.retries >= self.max_retries:
             _finalize_chunk(
-                ctx, source_id, chunk_id, "failed", f"retries exhausted: {exc}"[:500]
+                ctx,
+                project_id,
+                source_id,
+                chunk_id,
+                "failed",
+                f"retries exhausted: {exc}"[:500],
             )
         raise
     if state["error"] is not None:
-        _finalize_chunk(ctx, source_id, chunk_id, "failed", state["error"])
+        _finalize_chunk(ctx, project_id, source_id, chunk_id, "failed", state["error"])
         return
 
     trust = "escalated" if state["escalated"] else "trusted"
@@ -73,31 +81,30 @@ def extract_chunk_task(self, chunk_id: str):
             record = to_claim_record(
                 draft, chunk_id=chunk_id, source_id=chunk["source_id"], trust=trust
             )
-            ctx.graph.upsert_claim(record, embedding)
+            ctx.graph.upsert_claim(record, embedding, project_id=project_id)
 
     if not accepted and state["rejected"]:
-        # The model produced claims but the trust gate declined every one of
-        # them — the pipeline worked correctly, this is not an error. Mark
-        # `rejected`, not `failed`, so it's counted and reported separately.
         reasons = state["rejected"][0].get("reasons", [])
         error = "; ".join(reasons) if reasons else "claims rejected"
-        _finalize_chunk(ctx, source_id, chunk_id, "rejected", error[:500])
+        _finalize_chunk(ctx, project_id, source_id, chunk_id, "rejected", error[:500])
         return
 
     error = f"{len(state['rejected'])} claims rejected" if state["rejected"] else None
-    _finalize_chunk(ctx, source_id, chunk_id, "done", error)
+    _finalize_chunk(ctx, project_id, source_id, chunk_id, "done", error)
 
 
 @app.task
-def synthesize_task():
+def synthesize_task(project_id: str = "default"):
     ctx = get_context()
-    dirty = cluster_new_claims(ctx)
-    processed = process_dirty_concepts(ctx)
-    ordered = build_curriculum(ctx)
+    dirty = cluster_new_claims(ctx, project_id)
+    processed = process_dirty_concepts(ctx, project_id)
+    ordered = build_curriculum(ctx, project_id)
     payload = {
         "ts": int(time.time()),
         "dirty_concepts": len(dirty),
         "processed_concepts": processed,
         "curriculum_len": len(ordered),
     }
-    ctx.db.set_setting("synthesis:last_run", json.dumps(payload, sort_keys=True))
+    ctx.db.set_project_setting(
+        project_id, "synthesis:last_run", json.dumps(payload, sort_keys=True)
+    )

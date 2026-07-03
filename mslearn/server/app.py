@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from mslearn.providers.base import ProviderBadOutputError
-from mslearn.server.routers import admin, chat, corpus, evals, exports, memory, study
+from mslearn.server.routers import admin, chat, corpus, evals, exports, memory, projects, study
 from mslearn.worker.context import PipelineContext, build_default_context, set_context
 
 
@@ -38,6 +38,7 @@ def create_app(context: PipelineContext | None = None) -> FastAPI:
     app.include_router(corpus.router)
     app.include_router(exports.router)
     app.include_router(memory.router)
+    app.include_router(projects.router)
     app.include_router(study.router)
     app.include_router(study.quiz_router)
     app.include_router(evals.router)

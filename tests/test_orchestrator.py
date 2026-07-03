@@ -11,10 +11,10 @@ class RecordingGraph:
         self.sources = []
         self.chunks = []
 
-    def upsert_source(self, doc):
+    def upsert_source(self, doc, *, project_id="default"):
         self.sources.append(doc.source_id)
 
-    def upsert_chunks(self, chunks, embeddings):
+    def upsert_chunks(self, chunks, embeddings, *, project_id="default"):
         assert len(chunks) == len(embeddings)
         self.chunks.extend(c.chunk_id for c in chunks)
 
@@ -23,8 +23,8 @@ class NoDelayTask:
     def __init__(self):
         self.delayed = []
 
-    def delay(self, chunk_id):
-        self.delayed.append(chunk_id)
+    def delay(self, project_id, chunk_id):
+        self.delayed.append((project_id, chunk_id))
 
 
 @pytest.fixture()
@@ -45,6 +45,7 @@ def test_ingest_source_registers_and_enqueues(env, tiny_pdf):
     row = db.source_row(source_id)
     assert row["status"] == "running" and row["role"] == "spine"
     assert row["total_chunks"] == len(graph.chunks) == len(fake_task.delayed)
+    assert all(pid == "default" for pid, _ in fake_task.delayed)
 
 
 def test_ingest_failure_marks_failed(env, tmp_path):

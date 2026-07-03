@@ -13,10 +13,10 @@ class FakeGraph:
         self.chunks = chunks
         self.claims = {}
 
-    def get_chunk(self, chunk_id):
+    def get_chunk(self, chunk_id, *, project_id="default"):
         return self.chunks.get(chunk_id)
 
-    def upsert_claim(self, claim, embedding):
+    def upsert_claim(self, claim, embedding, *, project_id="default"):
         self.claims[claim.claim_id] = (claim, embedding)
 
 
@@ -44,7 +44,7 @@ def ctx(tmp_path):
 
 def test_successful_chunk_commits_claims(ctx):
     context = ctx(ScriptedRouter([GOOD]))
-    worker_tasks.extract_chunk_task.delay("s1:0").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
     cid = derive_claim_id("s1:0", "Cache invalidation is hard.")
     claim, embedding = context.graph.claims[cid]
     assert claim.trust == "trusted" and claim.source_id == "s1"
@@ -53,7 +53,7 @@ def test_successful_chunk_commits_claims(ctx):
 
 def test_escalated_claims_marked(ctx):
     context = ctx(ScriptedRouter([BAD, BAD, GOOD]))
-    worker_tasks.extract_chunk_task.delay("s1:0").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
     (claim, _), = context.graph.claims.values()
     assert claim.trust == "escalated"
 
@@ -61,7 +61,7 @@ def test_escalated_claims_marked(ctx):
 def test_paused_source_skips(ctx):
     context = ctx(ScriptedRouter([GOOD]))
     context.db.set_source_status("s1", "paused")
-    worker_tasks.extract_chunk_task.delay("s1:0").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
     assert context.graph.claims == {}
     assert context.db.pending_chunks("s1") == []  # marked skipped_paused, not pending
 
@@ -69,7 +69,7 @@ def test_paused_source_skips(ctx):
 def test_missing_chunk_marks_failed(ctx):
     context = ctx(ScriptedRouter([GOOD]))
     context.db.register_chunk_jobs("s1", ["s1:9"])
-    worker_tasks.extract_chunk_task.delay("s1:9").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:9").get()
     assert context.db.failure_stats("s1")["failed"] == 1
 
 
@@ -81,7 +81,7 @@ def test_failure_monitor_pauses_source(ctx, tmp_path):
     db.register_chunk_jobs("s2", chunk_ids)
     set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([]), graph=graph))
     for cid in chunk_ids[:10]:  # min_chunks=10, threshold=0.5 — source pauses once failed/total > 0.5 with total>=10 (trips at the 7th failure; remaining iterations skip as paused)
-        worker_tasks.extract_chunk_task.delay(cid).get()
+        worker_tasks.extract_chunk_task.delay("default", cid).get()
     assert db.source_row("s2")["status"] == "paused"
 
 
@@ -98,10 +98,10 @@ def test_failure_monitor_trips_on_combined_failed_and_rejected(tmp_path):
     router = ScriptedRouter([BAD, BAD, BAD, BAD] * 5)  # plenty of gate-rejection responses
     set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
     for cid in chunk_ids[:5]:  # missing from graph -> genuine failed
-        worker_tasks.extract_chunk_task.delay(cid).get()
+        worker_tasks.extract_chunk_task.delay("default", cid).get()
     assert db.source_row("s3")["status"] == "running"  # 5/12 problems, not over threshold yet
     for cid in chunk_ids[5:10]:  # present in graph, but gate rejects everything -> rejected
-        worker_tasks.extract_chunk_task.delay(cid).get()
+        worker_tasks.extract_chunk_task.delay("default", cid).get()
     # Once paused, remaining chunks short-circuit to `skipped_paused` rather
     # than being processed further — that's existing (correct) behaviour;
     # what matters here is that failed+rejected together tripped the pause.
@@ -118,7 +118,7 @@ def test_persistent_gate_rejection_marks_rejected_not_failed(ctx):
     # correctly, so this must count as `rejected`, not `failed`.
     context = ctx(ScriptedRouter([BAD, BAD, BAD, BAD]))
     context.db.set_source_status("s1", "running")
-    worker_tasks.extract_chunk_task.delay("s1:0").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
     stats = context.db.failure_stats("s1")
     assert stats["failed"] == 0
     assert stats["rejected"] == 1
@@ -131,7 +131,7 @@ def test_transient_exhaustion_marks_failed(ctx):
 
     context = ctx(ScriptedRouter([ProviderTransientError("net down")] * 10))
     try:
-        worker_tasks.extract_chunk_task.delay("s1:0").get()
+        worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
     except ProviderTransientError:
         pass
     assert context.db.failure_stats("s1")["failed"] == 1

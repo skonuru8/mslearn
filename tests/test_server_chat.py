@@ -173,7 +173,7 @@ def test_sessions_are_lru_capped(tmp_path, monkeypatch):
             assert response.status_code == 200
 
     # s1 was least-recently-used once s3 pushed the cap over 2 -> evicted.
-    assert list(chat_module._SESSIONS.keys()) == ["s2", "s3"]
+    assert list(chat_module._SESSIONS.keys()) == ["default:s2", "default:s3"]
 
 
 def test_mid_stream_provider_error_emits_error_frame(tmp_path):

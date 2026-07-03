@@ -18,22 +18,22 @@ _CONCEPT_NAME_SCHEMA = {
 _CONCEPT_DEPS_SCHEMA = {"type": "object", "properties": {"edges": {"type": "array"}}}
 
 
-def cluster_new_claims(ctx) -> set[str]:
+def cluster_new_claims(ctx, project_id: str = "default") -> set[str]:
     graph = ctx.graph
     db = ctx.db
     candidate_k = int(db.get_tunable("synth.candidate_k"))
     similarity_floor = db.get_tunable("synth.similarity_floor")
     prompt = get_prompt(db, "concept_match")
-    known_concepts = {c["concept_id"] for c in graph.all_concepts()}
+    known_concepts = {c["concept_id"] for c in graph.all_concepts(project_id=project_id)}
     dirty: set[str] = set()
     drops = 0
 
-    for anchor in graph.unassigned_trusted_claims():
+    for anchor in graph.unassigned_trusted_claims(project_id=project_id):
         anchor_id = anchor["claim_id"]
-        if graph.concept_id_of_claim(anchor_id) is not None:
+        if graph.concept_id_of_claim(anchor_id, project_id=project_id) is not None:
             continue
 
-        hits = graph.vector_search_claims(anchor["embedding"], k=candidate_k + 1)
+        hits = graph.vector_search_claims(anchor["embedding"], k=candidate_k + 1, project_id=project_id)
         candidates = [
             h
             for h in hits
@@ -42,9 +42,9 @@ def cluster_new_claims(ctx) -> set[str]:
             and h.get("trust") in {"trusted", "escalated"}
         ]
         if not candidates:
-            concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id])
-            graph.assign_claim(anchor_id, concept_id)
-            graph.mark_concept_dirty(concept_id, True)
+            concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id], project_id=project_id)
+            graph.assign_claim(anchor_id, concept_id, project_id=project_id)
+            graph.mark_concept_dirty(concept_id, True, project_id=project_id)
             dirty.add(concept_id)
             continue
 
@@ -70,9 +70,9 @@ def cluster_new_claims(ctx) -> set[str]:
                 drops += 1
 
         if not matches:
-            concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id])
-            graph.assign_claim(anchor_id, concept_id)
-            graph.mark_concept_dirty(concept_id, True)
+            concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id], project_id=project_id)
+            graph.assign_claim(anchor_id, concept_id, project_id=project_id)
+            graph.mark_concept_dirty(concept_id, True, project_id=project_id)
             dirty.add(concept_id)
             continue
 
@@ -81,25 +81,25 @@ def cluster_new_claims(ctx) -> set[str]:
             cid = candidate["claim_id"]
             if cid not in matches:
                 continue
-            existing = graph.concept_id_of_claim(cid)
+            existing = graph.concept_id_of_claim(cid, project_id=project_id)
             if existing is not None:
                 chosen_concept = existing
                 break
 
         if chosen_concept is not None:
-            graph.assign_claim(anchor_id, chosen_concept)
-            graph.mark_concept_dirty(chosen_concept, True)
+            graph.assign_claim(anchor_id, chosen_concept, project_id=project_id)
+            graph.mark_concept_dirty(chosen_concept, True, project_id=project_id)
             dirty.add(chosen_concept)
             continue
 
         matched_unassigned = [
-            claim_id for claim_id in matches if graph.concept_id_of_claim(claim_id) is None
+            claim_id for claim_id in matches if graph.concept_id_of_claim(claim_id, project_id=project_id) is None
         ]
-        concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id, *matched_unassigned])
-        graph.assign_claim(anchor_id, concept_id)
+        concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id, *matched_unassigned], project_id=project_id)
+        graph.assign_claim(anchor_id, concept_id, project_id=project_id)
         for claim_id in matched_unassigned:
-            graph.assign_claim(claim_id, concept_id)
-        graph.mark_concept_dirty(concept_id, True)
+            graph.assign_claim(claim_id, concept_id, project_id=project_id)
+        graph.mark_concept_dirty(concept_id, True, project_id=project_id)
         dirty.add(concept_id)
 
     if drops > 0:
@@ -162,18 +162,18 @@ def classify_conflict_pair(
     return None
 
 
-def process_dirty_concepts(ctx) -> int:
+def process_dirty_concepts(ctx, project_id: str = "default") -> int:
     graph = ctx.graph
     db = ctx.db
-    dirty_ids = graph.dirty_concepts()
+    dirty_ids = graph.dirty_concepts(project_id=project_id)
     conflict_prompt = get_prompt(db, "conflict_scan")
     name_prompt = get_prompt(db, "concept_name")
-    profile = get_domain_profile(db)
+    profile = get_domain_profile(db, project_id)
     guidance = domain_guidance(profile)
     drops = 0
 
     for concept_id in dirty_ids:
-        claims = graph.claims_in_concept(concept_id)
+        claims = graph.claims_in_concept(concept_id, project_id=project_id)
         claim_ids = {c["claim_id"] for c in claims}
 
         if len(claims) >= 2:
@@ -219,7 +219,7 @@ def process_dirty_concepts(ctx) -> int:
                     )
                     drops += 1
                     continue
-                graph.add_conflict(claim_a, claim_b, classification, str(rationale))
+                graph.add_conflict(claim_a, claim_b, classification, str(rationale), project_id=project_id)
 
         name_response = ctx.router.complete(
             "synthesis",
@@ -237,25 +237,26 @@ def process_dirty_concepts(ctx) -> int:
             concept_id,
             name=str(parsed_name.get("name", "")),
             summary=str(parsed_name.get("summary", "")),
+            project_id=project_id,
         )
-        graph.mark_concept_dirty(concept_id, False)
+        graph.mark_concept_dirty(concept_id, False, project_id=project_id)
 
     if drops > 0:
         logger.warning("process_dirty_concepts: dropped %d conflict item(s) total", drops)
     return len(dirty_ids)
 
 
-def build_curriculum(ctx) -> list[str]:
+def build_curriculum(ctx, project_id: str = "default") -> list[str]:
     graph = ctx.graph
     db = ctx.db
-    all_concepts = {c["concept_id"]: c for c in graph.all_concepts()}
-    spine_rows = graph.spine_concept_order()
+    all_concepts = {c["concept_id"]: c for c in graph.all_concepts(project_id=project_id)}
+    spine_rows = graph.spine_concept_order(project_id=project_id)
     spine_ids = [r["concept_id"] for r in spine_rows]
     first_seq = {r["concept_id"]: int(r["first_seq"]) for r in spine_rows}
 
     deps = {
         (row["from_id"], row["to_id"])
-        for row in graph.concept_dependencies()
+        for row in graph.concept_dependencies(project_id=project_id)
         if row["from_id"] in set(spine_ids) and row["to_id"] in set(spine_ids)
     }
     drops = 0
@@ -297,7 +298,7 @@ def build_curriculum(ctx) -> list[str]:
                 )
                 drops += 1
             else:
-                graph.add_depends_on(from_id, to_id)
+                graph.add_depends_on(from_id, to_id, project_id=project_id)
 
     if drops > 0:
         logger.warning("build_curriculum: dropped %d edge(s) total", drops)
@@ -308,18 +309,18 @@ def build_curriculum(ctx) -> list[str]:
     )
     ordered = ordered_spine + non_spine
     for idx, concept_id in enumerate(ordered):
-        graph.set_concept_meta(concept_id, order_index=idx)
+        graph.set_concept_meta(concept_id, order_index=idx, project_id=project_id)
     return ordered
 
 
-def _ensure_concept(graph, known_concepts: set[str], concept_id: str) -> None:
+def _ensure_concept(graph, known_concepts: set[str], concept_id: str, *, project_id: str = "default") -> None:
     if concept_id in known_concepts:
         return
-    graph.upsert_concept(ConceptRecord(concept_id=concept_id, name=""))
+    graph.upsert_concept(ConceptRecord(concept_id=concept_id, name=""), project_id=project_id)
     known_concepts.add(concept_id)
 
 
-def _mint_or_reuse_concept(graph, known_concepts: set[str], claim_ids: list[str]) -> str:
+def _mint_or_reuse_concept(graph, known_concepts: set[str], claim_ids: list[str], *, project_id: str = "default") -> str:
     """Mint a concept id for claims that were unassigned when the caller last
     checked, or reuse whichever one of them a concurrent synthesis run
     assigned in the meantime.
@@ -331,11 +332,11 @@ def _mint_or_reuse_concept(graph, known_concepts: set[str], claim_ids: list[str]
     get a freshly minted id.
     """
     for claim_id in claim_ids:
-        existing = graph.concept_id_of_claim(claim_id)
+        existing = graph.concept_id_of_claim(claim_id, project_id=project_id)
         if existing is not None:
             return existing
     concept_id = f"k-{min(claim_ids)}"
-    _ensure_concept(graph, known_concepts, concept_id)
+    _ensure_concept(graph, known_concepts, concept_id, project_id=project_id)
     return concept_id
 
 

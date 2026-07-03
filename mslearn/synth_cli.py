@@ -20,7 +20,7 @@ def main() -> None:
     if args.local:
         app.conf.task_always_eager = True
     set_context(build_default_context())
-    synthesize_task.delay().get()
+    synthesize_task.delay("default").get()
     graph = get_context().graph
     concepts = graph.all_concepts()
     curriculum = graph.curriculum()

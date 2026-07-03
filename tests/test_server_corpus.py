@@ -17,8 +17,8 @@ class NoDelayTask:
     def __init__(self):
         self.delayed = []
 
-    def delay(self, chunk_id):
-        self.delayed.append(chunk_id)
+    def delay(self, project_id, chunk_id):
+        self.delayed.append((project_id, chunk_id))
 
 
 @pytest.fixture()
@@ -159,7 +159,7 @@ def test_failures_grouped_and_retry_resets_and_reenqueues(client, tiny_pdf):
     c, db, fake_task = client
     r = c.post("/api/corpus/sources", json={"ref": str(tiny_pdf), "role": "spine"})
     source_id = r.json()["source_id"]
-    chunk_ids = list(fake_task.delayed)
+    chunk_ids = [cid for _pid, cid in fake_task.delayed]
     assert len(chunk_ids) >= 2
     db.mark_chunk(chunk_ids[0], "failed", error="boom: bad json")
     db.mark_chunk(chunk_ids[1], "failed", error="boom: bad json")
@@ -180,7 +180,7 @@ def test_failures_grouped_and_retry_resets_and_reenqueues(client, tiny_pdf):
     assert row["status"] == "running"
     assert row["error"] is None
     assert row["failed_chunks"] == 0
-    assert sorted(fake_task.delayed) == sorted(chunk_ids[:2])
+    assert sorted(cid for _pid, cid in fake_task.delayed) == sorted(chunk_ids[:2])
 
 
 def test_failures_and_retry_unknown_source_404(client):
@@ -225,8 +225,8 @@ def test_synthesis_status_reflects_last_run_setting(client):
     assert r.status_code == 200
     assert r.json() == {"last_run": None}
 
-    db.set_setting(
-        "synthesis:last_run",
+    db.set_project_setting(
+        "default", "synthesis:last_run",
         json.dumps({"ts": 123, "dirty_concepts": 2, "processed_concepts": 2, "curriculum_len": 5}),
     )
     r = c.get("/api/corpus/synthesis/status")

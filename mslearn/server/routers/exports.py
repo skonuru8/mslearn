@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from mslearn.pipeline.exports import export_anki, export_graph, export_markdown
-from mslearn.server.deps import get_ctx
+from mslearn.server.deps import get_ctx, get_project_id
 
 router = APIRouter(prefix="/api/exports", tags=["exports"])
 
@@ -20,16 +20,18 @@ class ExportRequest(BaseModel):
 
 
 @router.post("")
-def create_export(body: ExportRequest, ctx=Depends(get_ctx)):
+def create_export(
+    body: ExportRequest, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)
+):
     out_dir = Path("data") / "exports" / _timestamp()
     files: dict[str, list[str]] = {}
     for kind in body.kinds:
         if kind == "markdown":
-            paths = export_markdown(ctx, out_dir / "markdown")
+            paths = export_markdown(ctx, out_dir / "markdown", project_id)
         elif kind == "anki":
-            paths = [export_anki(ctx, out_dir / "mslearn.apkg")]
+            paths = [export_anki(ctx, out_dir / "mslearn.apkg", project_id)]
         else:
-            paths = export_graph(ctx, out_dir / "graph")
+            paths = export_graph(ctx, out_dir / "graph", project_id)
         files[kind] = [path.as_posix() for path in paths]
     return {"root": out_dir.as_posix(), "files": files}
 

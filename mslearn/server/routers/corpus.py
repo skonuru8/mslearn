@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from mslearn.pipeline.orchestrator import IngestError, ingest_source, resume_pending
 from mslearn.prompts import get_domain_profile
-from mslearn.server.deps import get_ctx
+from mslearn.server.deps import get_ctx, get_project_id
 from mslearn.worker.app import app as celery_app
 from mslearn.worker.app import worker_online
 from mslearn.worker.tasks import synthesize_task
@@ -51,7 +51,11 @@ def _local_eager():
 
 
 @router.post("/sources")
-def create_source(body: IngestRequest, ctx=Depends(get_ctx)):
+def create_source(
+    body: IngestRequest,
+    ctx=Depends(get_ctx),
+    project_id: str = Depends(get_project_id),
+):
     try:
         if body.local:
             with _local_eager():
@@ -60,6 +64,7 @@ def create_source(body: IngestRequest, ctx=Depends(get_ctx)):
                     role=body.role,
                     source_type=body.source_type,
                     enqueue=True,
+                    project_id=project_id,
                 )
         else:
             source_id = ingest_source(
@@ -67,6 +72,7 @@ def create_source(body: IngestRequest, ctx=Depends(get_ctx)):
                 role=body.role,
                 source_type=body.source_type,
                 enqueue=True,
+                project_id=project_id,
             )
     except IngestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
@@ -111,6 +117,7 @@ def upload_source(
     role: str = Form("supplement"),
     local: bool = Form(False),
     ctx=Depends(get_ctx),
+    project_id: str = Depends(get_project_id),
 ):
     original = Path(file.filename or "upload").name
     suffix = Path(original).suffix.lower()
@@ -128,79 +135,80 @@ def upload_source(
     try:
         if local:
             with _local_eager():
-                source_id = ingest_source(str(dest), role=role, enqueue=True)
+                source_id = ingest_source(str(dest), role=role, enqueue=True, project_id=project_id)
         else:
-            source_id = ingest_source(str(dest), role=role, enqueue=True)
+            source_id = ingest_source(str(dest), role=role, enqueue=True, project_id=project_id)
     except IngestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     return {"source_id": source_id, "stored_path": str(dest)}
 
 
 @router.get("/sources")
-def list_sources(ctx=Depends(get_ctx)):
-    return ctx.db.all_sources()
+def list_sources(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    return ctx.db.all_sources(project_id)
 
 
 @router.post("/sources/{source_id}/pause")
-def pause_source(source_id: str, ctx=Depends(get_ctx)):
-    if ctx.db.source_row(source_id) is None:
+def pause_source(source_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    if ctx.db.source_row(source_id, project_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
     ctx.db.set_source_status(source_id, "paused")
     return {"source_id": source_id, "status": "paused"}
 
 
 @router.post("/sources/{source_id}/resume")
-def resume_source(source_id: str, ctx=Depends(get_ctx)):
-    if ctx.db.source_row(source_id) is None:
+def resume_source(source_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    if ctx.db.source_row(source_id, project_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
-    # clear_error=True: set_source_status normally COALESCEs and keeps the old
-    # error, which would otherwise survive a resume (e.g. a stale pause
-    # reason showing on a source that's running fine again).
     ctx.db.set_source_status(source_id, "running", clear_error=True)
-    resumed = resume_pending()
+    resumed = resume_pending(project_id)
     return {"source_id": source_id, "status": "running", "resumed_chunks": resumed}
 
 
 @router.get("/sources/{source_id}/failures")
-def source_failures(source_id: str, ctx=Depends(get_ctx)):
-    if ctx.db.source_row(source_id) is None:
+def source_failures(source_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    if ctx.db.source_row(source_id, project_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
     return ctx.db.failure_groups(source_id)
 
 
 @router.post("/sources/{source_id}/retry-failed")
-def retry_failed_source(source_id: str, ctx=Depends(get_ctx)):
-    if ctx.db.source_row(source_id) is None:
+def retry_failed_source(
+    source_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)
+):
+    if ctx.db.source_row(source_id, project_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
     reset_ids = ctx.db.reset_failed_chunks(source_id)
     ctx.db.set_source_status(source_id, "running", clear_error=True)
-    resume_pending()  # re-enqueues the now-pending chunks (same machinery as /resume)
+    resume_pending(project_id)
     return {"source_id": source_id, "status": "running", "retried_chunks": len(reset_ids)}
 
 
 @router.get("/settings/domain-profile")
-def get_domain_profile_endpoint(ctx=Depends(get_ctx)):
-    return {"profile": get_domain_profile(ctx.db)}
+def get_domain_profile_endpoint(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    return {"profile": get_domain_profile(ctx.db, project_id)}
 
 
 @router.post("/settings/domain-profile")
-def set_domain_profile(body: DomainProfileUpdate, ctx=Depends(get_ctx)):
+def set_domain_profile(
+    body: DomainProfileUpdate, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)
+):
     if body.profile not in VALID_PROFILES:
         raise HTTPException(
             status_code=422,
             detail=f"profile must be one of {sorted(VALID_PROFILES)}",
         )
-    ctx.db.set_setting("corpus.domain_profile", body.profile)
+    ctx.db.set_project_setting(project_id, "corpus.domain_profile", body.profile)
     return {"profile": body.profile}
 
 
 @router.post("/synthesize")
-def enqueue_synthesis(ctx=Depends(get_ctx)):
-    synthesize_task.delay()
+def enqueue_synthesis(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    synthesize_task.delay(project_id)
     return {"enqueued": True, "worker_online": worker_online()}
 
 
 @router.get("/synthesis/status")
-def synthesis_status(ctx=Depends(get_ctx)):
-    raw = ctx.db.get_setting("synthesis:last_run")
+def synthesis_status(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    raw = ctx.db.get_project_setting(project_id, "synthesis:last_run")
     return {"last_run": json.loads(raw) if raw is not None else None}

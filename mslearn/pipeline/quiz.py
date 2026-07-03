@@ -30,22 +30,22 @@ _GRADE_SCHEMA = {
 }
 
 
-def next_concept(ctx) -> str | None:
-    concepts = ctx.graph.curriculum()
+def next_concept(ctx, project_id: str = "default") -> str | None:
+    concepts = ctx.graph.curriculum(project_id=project_id)
     if not concepts:
-        concepts = ctx.graph.all_concepts()
+        concepts = ctx.graph.all_concepts(project_id=project_id)
     if not concepts:
         return None
 
     by_id = {row["concept_id"]: row for row in concepts}
-    stats = {row["concept_id"]: row for row in ctx.db.quiz_stats()}
+    stats = {row["concept_id"]: row for row in ctx.db.quiz_stats(project_id=project_id)}
     failures = [
         row
         for row in stats.values()
         if row["concept_id"] in by_id and row.get("last_correct") is False
     ]
     if failures:
-        struggle_text = _struggle_text(ctx.memory)
+        struggle_text = _struggle_text(ctx.memory, project_id)
         failures.sort(
             key=lambda row: (
                 _mentions_concept(struggle_text, by_id[row["concept_id"]]),
@@ -68,11 +68,11 @@ def _pending_key(session_id: str, concept_id: str) -> str:
     return f"quiz:pending:{session_id}:{concept_id}"
 
 
-def generate_question(ctx, concept_id: str, session_id: str) -> dict:
-    concept = ctx.graph.get_concept(concept_id)
+def generate_question(ctx, concept_id: str, session_id: str, project_id: str = "default") -> dict:
+    concept = ctx.graph.get_concept(concept_id, project_id=project_id)
     if concept is None:
         raise KeyError(f"unknown concept {concept_id!r}")
-    claims = _trusted_claims(ctx.graph.claims_in_concept(concept_id))
+    claims = _trusted_claims(ctx.graph.claims_in_concept(concept_id, project_id=project_id))
     response = ctx.router.complete(
         "synthesis",
         ModelRequest(
@@ -98,8 +98,10 @@ def generate_question(ctx, concept_id: str, session_id: str) -> dict:
     return result
 
 
-def grade_answer(ctx, concept_id: str, answer: str, session_id: str) -> dict:
-    concept = ctx.graph.get_concept(concept_id)
+def grade_answer(
+    ctx, concept_id: str, answer: str, session_id: str, project_id: str = "default"
+) -> dict:
+    concept = ctx.graph.get_concept(concept_id, project_id=project_id)
     if concept is None:
         raise KeyError(f"unknown concept {concept_id!r}")
     pending = _pending_question(ctx, session_id, concept_id)
@@ -126,19 +128,19 @@ def grade_answer(ctx, concept_id: str, answer: str, session_id: str) -> dict:
         raise ProviderBadOutputError("invalid quiz_grade schema: explanation required")
 
     result = {"correct": parsed["correct"], "score_0_100": score, "explanation": explanation}
-    ctx.db.record_quiz_result(concept_id, correct=result["correct"], score=score)
+    ctx.db.record_quiz_result(concept_id, correct=result["correct"], score=score, project_id=project_id)
     # Delete the pending slot so a replayed /quiz/answer can't be graded
     # again against the same cached question (which would inflate quiz_stats).
     ctx.db.delete_setting(_pending_key(session_id, concept_id))
     if not result["correct"]:
-        _record_struggle(ctx.memory, concept, pending)
+        _record_struggle(ctx.memory, concept, pending, project_id)
     return result
 
 
-def public_quiz_stats(ctx) -> list[dict]:
+def public_quiz_stats(ctx, project_id: str = "default") -> list[dict]:
     return [
         {key: value for key, value in row.items() if key != "last_ts"}
-        for row in ctx.db.quiz_stats()
+        for row in ctx.db.quiz_stats(project_id=project_id)
     ]
 
 
@@ -190,18 +192,18 @@ def _require_dict(parsed: Any, prompt_name: str) -> dict:
     return parsed
 
 
-def _record_struggle(memory, concept: dict, pending: dict) -> None:
+def _record_struggle(memory, concept: dict, pending: dict, project_id: str = "default") -> None:
     if memory is None:
         return
     expected_points = pending.get("expected_points")
     missed = str(expected_points[0]) if expected_points else "expected reasoning point"
-    memory.add(f"struggled with {concept.get('name', '')}: {missed}", "struggle")
+    memory.add(f"struggled with {concept.get('name', '')}: {missed}", "struggle", project_id=project_id)
 
 
-def _struggle_text(memory) -> str:
+def _struggle_text(memory, project_id: str = "default") -> str:
     if memory is None:
         return ""
-    hits = memory.search("struggles", k=20)
+    hits = memory.search("struggles", k=20, project_id=project_id)
     return "\n".join(_memory_text(item) for item in hits).lower()
 
 

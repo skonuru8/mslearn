@@ -10,9 +10,9 @@ class TeachingError(Exception):
     """Teaching generation failed its required output contract."""
 
 
-def generate_teaching(ctx, concept_id: str, force: bool = False) -> str:
+def generate_teaching(ctx, concept_id: str, force: bool = False, project_id: str = "default") -> str:
     graph = ctx.graph
-    concept = graph.get_concept(concept_id)
+    concept = graph.get_concept(concept_id, project_id=project_id)
     if concept is None:
         raise TeachingError(f"unknown concept {concept_id!r}")
 
@@ -21,10 +21,13 @@ def generate_teaching(ctx, concept_id: str, force: bool = False) -> str:
         return cached
 
     prompt = _build_prompt(
-        ctx, concept, _trusted_claims(graph.claims_in_concept(concept_id))
+        ctx,
+        concept,
+        _trusted_claims(graph.claims_in_concept(concept_id, project_id=project_id)),
+        project_id=project_id,
     )
     markdown = _complete_teaching(ctx, prompt)
-    conflicts = graph.conflicts_in_concept(concept_id)
+    conflicts = graph.conflicts_in_concept(concept_id, project_id=project_id)
     if conflicts and "## Where sources disagree" not in markdown:
         corrective = (
             f"{prompt}\n\n"
@@ -35,8 +38,8 @@ def generate_teaching(ctx, concept_id: str, force: bool = False) -> str:
         if "## Where sources disagree" not in markdown:
             raise TeachingError("teaching omitted required conflict section")
 
-    graph.set_concept_teaching(concept_id, markdown)
-    graph.mark_concept_dirty(concept_id, False)
+    graph.set_concept_teaching(concept_id, markdown, project_id=project_id)
+    graph.mark_concept_dirty(concept_id, False, project_id=project_id)
     return markdown
 
 
@@ -52,18 +55,20 @@ def _complete_teaching(ctx, content: str) -> str:
     return response.text
 
 
-def _build_prompt(ctx, concept: dict, claims: list[dict]) -> str:
+def _build_prompt(ctx, concept: dict, claims: list[dict], *, project_id: str = "default") -> str:
     prompt = get_prompt(ctx.db, "teach_concept")
-    profile = get_domain_profile(ctx.db)
+    profile = get_domain_profile(ctx.db, project_id)
     claim_ids = [row["claim_id"] for row in claims]
-    citations = ctx.graph.citations_for_claims(claim_ids)
+    citations = ctx.graph.citations_for_claims(claim_ids, project_id=project_id)
     return prompt.format(
         domain_guidance=domain_guidance(profile),
         concept_name=concept.get("name", ""),
         concept_summary=concept.get("summary", ""),
         claims=_format_claims(claims),
-        conflicts=_format_conflicts(ctx.graph.conflicts_in_concept(concept["concept_id"])),
-        memory_hints=_format_memory_hints(ctx.memory, concept.get("name", "")),
+        conflicts=_format_conflicts(
+            ctx.graph.conflicts_in_concept(concept["concept_id"], project_id=project_id)
+        ),
+        memory_hints=_format_memory_hints(ctx.memory, concept.get("name", ""), project_id),
     ) + _format_citations(citations)
 
 
@@ -94,10 +99,10 @@ def _format_conflicts(conflicts: list[dict]) -> str:
     )
 
 
-def _format_memory_hints(memory, concept_name: str) -> str:
+def _format_memory_hints(memory, concept_name: str, project_id: str = "default") -> str:
     if memory is None or not concept_name:
         return "(none)"
-    hits = memory.search(concept_name, k=5)
+    hits = memory.search(concept_name, k=5, project_id=project_id)
     if not hits:
         return "(none)"
     return "\n".join(f"- PERSONALIZATION ONLY: {_memory_text(item)}" for item in hits)

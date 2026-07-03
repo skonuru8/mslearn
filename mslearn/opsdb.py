@@ -83,7 +83,18 @@ CREATE TABLE IF NOT EXISTS evolution_runs (
     accepted INTEGER NOT NULL,
     reason TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS projects (
+    project_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_ts REAL NOT NULL
+);
 """
+
+DEFAULT_PROJECT_ID = "default"
+
+
+def project_setting_key(project_id: str, key: str) -> str:
+    return f"project:{project_id}:{key}"
 
 TUNABLE_DEFAULTS: dict[str, float] = {
     "trust.quote_threshold": 90.0,
@@ -109,6 +120,48 @@ class OpsDB:
             raise RuntimeError(f"WAL mode unavailable for {path}; got journal_mode={mode!r}")
         self.conn.executescript(_SCHEMA)
         self._ensure_column("ingest_sources", "rejected_chunks", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("ingest_sources", "project_id", "TEXT NOT NULL DEFAULT 'default'")
+        self._ensure_column("chunk_jobs", "project_id", "TEXT NOT NULL DEFAULT 'default'")
+        self._ensure_column("quiz_results", "project_id", "TEXT NOT NULL DEFAULT 'default'")
+        self._bootstrap_projects()
+        self._migrate_legacy_project_settings()
+
+    def _bootstrap_projects(self) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO projects (project_id, name, created_ts)"
+                " VALUES (?, ?, ?)",
+                (DEFAULT_PROJECT_ID, "Default project", time.time()),
+            )
+
+    def _migrate_legacy_project_settings(self) -> None:
+        """Copy pre-project global corpus keys into the default project scope once."""
+        legacy = {
+            "corpus.domain_profile": "technical",
+            "synthesis:last_run": None,
+        }
+        with self._lock, self.conn:
+            for key, default in legacy.items():
+                scoped = project_setting_key(DEFAULT_PROJECT_ID, key)
+                if self.conn.execute(
+                    "SELECT 1 FROM settings WHERE key = ?", (scoped,)
+                ).fetchone():
+                    continue
+                row = self.conn.execute(
+                    "SELECT value FROM settings WHERE key = ?", (key,)
+                ).fetchone()
+                if row is not None:
+                    self.conn.execute(
+                        "INSERT INTO settings (key, value) VALUES (?, ?)"
+                        " ON CONFLICT(key) DO NOTHING",
+                        (scoped, row["value"]),
+                    )
+                elif default is not None:
+                    self.conn.execute(
+                        "INSERT INTO settings (key, value) VALUES (?, ?)"
+                        " ON CONFLICT(key) DO NOTHING",
+                        (scoped, default),
+                    )
 
     def _ensure_column(self, table: str, column: str, coltype_and_default: str) -> None:
         """Guarded `ALTER TABLE ... ADD COLUMN` for databases created before this column existed."""
@@ -158,6 +211,86 @@ class OpsDB:
         with self._lock, self.conn:
             self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
 
+    def get_project_setting(
+        self, project_id: str, key: str, default: str | None = None
+    ) -> str | None:
+        return self.get_setting(project_setting_key(project_id, key), default)
+
+    def set_project_setting(self, project_id: str, key: str, value: str) -> None:
+        self.set_setting(project_setting_key(project_id, key), value)
+
+    def delete_project_setting(self, project_id: str, key: str) -> None:
+        self.delete_setting(project_setting_key(project_id, key))
+
+    def create_project(self, project_id: str, name: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO projects (project_id, name, created_ts) VALUES (?, ?, ?)",
+                (project_id, name, time.time()),
+            )
+
+    def list_projects(self) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT project_id, name, created_ts FROM projects ORDER BY created_ts"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def project_exists(self, project_id: str) -> bool:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
+            ).fetchone()
+        return row is not None
+
+    def delete_project(self, project_id: str) -> None:
+        if project_id == DEFAULT_PROJECT_ID:
+            raise ValueError("cannot delete the default project")
+        with self._lock, self.conn:
+            source_ids = [
+                r["source_id"]
+                for r in self.conn.execute(
+                    "SELECT source_id FROM ingest_sources WHERE project_id = ?",
+                    (project_id,),
+                ).fetchall()
+            ]
+            if source_ids:
+                placeholders = ",".join("?" for _ in source_ids)
+                self.conn.execute(
+                    f"DELETE FROM chunk_jobs WHERE source_id IN ({placeholders})",
+                    source_ids,
+                )
+            self.conn.execute(
+                "DELETE FROM ingest_sources WHERE project_id = ?", (project_id,)
+            )
+            self.conn.execute(
+                "DELETE FROM quiz_results WHERE project_id = ?", (project_id,)
+            )
+            self.conn.execute(
+                "DELETE FROM settings WHERE key LIKE ?", (f"project:{project_id}:%",)
+            )
+            self.conn.execute(
+                "DELETE FROM projects WHERE project_id = ?", (project_id,)
+            )
+
+    def project_id_for_chunk(self, chunk_id: str) -> str:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT s.project_id FROM chunk_jobs c"
+                " JOIN ingest_sources s ON c.source_id = s.source_id"
+                " WHERE c.chunk_id = ?",
+                (chunk_id,),
+            ).fetchone()
+        return row["project_id"] if row else DEFAULT_PROJECT_ID
+
+    def project_id_for_source(self, source_id: str) -> str:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT project_id FROM ingest_sources WHERE source_id = ?",
+                (source_id,),
+            ).fetchone()
+        return row["project_id"] if row else DEFAULT_PROJECT_ID
+
     def get_tunable(self, key: str) -> float:
         with self._lock:
             row = self.conn.execute(
@@ -193,12 +326,12 @@ class OpsDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def register_source(self, source_id, ref, role, total_chunks) -> None:
+    def register_source(self, source_id, ref, role, total_chunks, project_id=DEFAULT_PROJECT_ID) -> None:
         with self._lock, self.conn:
             self.conn.execute(
                 "INSERT OR IGNORE INTO ingest_sources"
-                " (source_id, ref, role, total_chunks, ts) VALUES (?, ?, ?, ?, ?)",
-                (source_id, ref, role, total_chunks, time.time()),
+                " (source_id, ref, role, total_chunks, ts, project_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (source_id, ref, role, total_chunks, time.time(), project_id),
             )
 
     def set_source_status(self, source_id, status, error=None, clear_error=False) -> None:
@@ -215,23 +348,33 @@ class OpsDB:
                     (status, error, source_id),
                 )
 
-    def source_row(self, source_id) -> dict | None:
+    def source_row(self, source_id, project_id: str | None = None) -> dict | None:
         with self._lock:
-            row = self.conn.execute(
-                "SELECT * FROM ingest_sources WHERE source_id = ?", (source_id,)
-            ).fetchone()
+            if project_id is not None:
+                row = self.conn.execute(
+                    "SELECT * FROM ingest_sources WHERE source_id = ? AND project_id = ?",
+                    (source_id, project_id),
+                ).fetchone()
+            else:
+                row = self.conn.execute(
+                    "SELECT * FROM ingest_sources WHERE source_id = ?", (source_id,)
+                ).fetchone()
         return dict(row) if row else None
 
-    def all_sources(self) -> list[dict]:
+    def all_sources(self, project_id: str = DEFAULT_PROJECT_ID) -> list[dict]:
         with self._lock:
-            rows = self.conn.execute("SELECT * FROM ingest_sources ORDER BY ts").fetchall()
+            rows = self.conn.execute(
+                "SELECT * FROM ingest_sources WHERE project_id = ? ORDER BY ts",
+                (project_id,),
+            ).fetchall()
         return [dict(r) for r in rows]
 
-    def register_chunk_jobs(self, source_id, chunk_ids) -> None:
+    def register_chunk_jobs(self, source_id, chunk_ids, project_id=DEFAULT_PROJECT_ID) -> None:
         with self._lock, self.conn:
             self.conn.executemany(
-                "INSERT OR IGNORE INTO chunk_jobs (chunk_id, source_id) VALUES (?, ?)",
-                [(cid, source_id) for cid in chunk_ids],
+                "INSERT OR IGNORE INTO chunk_jobs (chunk_id, source_id, project_id)"
+                " VALUES (?, ?, ?)",
+                [(cid, source_id, project_id) for cid in chunk_ids],
             )
 
     def mark_chunk(self, chunk_id, status, error=None) -> None:
@@ -372,19 +515,22 @@ class OpsDB:
         return {"total": row["total"], "failed": failed, "rejected": rejected,
                 "problems": failed + rejected}
 
-    def record_quiz_result(self, concept_id: str, correct: bool, score: int) -> None:
+    def record_quiz_result(
+        self, concept_id: str, correct: bool, score: int, project_id: str = DEFAULT_PROJECT_ID
+    ) -> None:
         with self._lock, self.conn:
             self.conn.execute(
-                "INSERT INTO quiz_results (ts, concept_id, correct, score) VALUES (?, ?, ?, ?)",
-                (time.time(), concept_id, 1 if correct else 0, int(score)),
+                "INSERT INTO quiz_results (ts, concept_id, correct, score, project_id)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (time.time(), concept_id, 1 if correct else 0, int(score), project_id),
             )
 
-    def quiz_stats(self, concept_id: str | None = None):
-        query = "SELECT * FROM quiz_results"
-        params: tuple[str, ...] = ()
+    def quiz_stats(self, concept_id: str | None = None, project_id: str = DEFAULT_PROJECT_ID):
+        query = "SELECT * FROM quiz_results WHERE project_id = ?"
+        params: tuple[str, ...] = (project_id,)
         if concept_id is not None:
-            query += " WHERE concept_id = ?"
-            params = (concept_id,)
+            query += " AND concept_id = ?"
+            params = (project_id, concept_id)
         query += " ORDER BY concept_id, id"
         with self._lock:
             rows = [dict(row) for row in self.conn.execute(query, params).fetchall()]

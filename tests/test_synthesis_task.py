@@ -18,10 +18,10 @@ class FakeGraph:
         self._chunks = chunks
         self.claims = {}
 
-    def get_chunk(self, chunk_id):
+    def get_chunk(self, chunk_id, *, project_id="default"):
         return self._chunks.get(chunk_id)
 
-    def upsert_claim(self, claim_record, embedding):
+    def upsert_claim(self, claim_record, embedding, *, project_id="default"):
         self.claims[claim_record.claim_id] = (claim_record, embedding)
 
 
@@ -50,15 +50,15 @@ def test_trigger_runs_once_when_source_completes(tmp_path, monkeypatch):
         def __init__(self):
             self.calls = 0
 
-        def delay(self):
+        def delay(self, project_id="default"):
             self.calls += 1
 
     trigger = Trigger()
     monkeypatch.setattr(worker_tasks, "synthesize_task", trigger)
 
-    worker_tasks.extract_chunk_task.delay("s1:0").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
     assert trigger.calls == 0
-    worker_tasks.extract_chunk_task.delay("s1:1").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:1").get()
     assert trigger.calls == 1
     assert db.source_row("s1")["status"] == "done"
 
@@ -83,14 +83,14 @@ def test_all_failed_source_never_triggers_synthesis(tmp_path, monkeypatch):
         def __init__(self):
             self.calls = 0
 
-        def delay(self):
+        def delay(self, project_id="default"):
             self.calls += 1
 
     trigger = Trigger()
     monkeypatch.setattr(worker_tasks, "synthesize_task", trigger)
 
-    worker_tasks.extract_chunk_task.delay("s1:0").get()
-    worker_tasks.extract_chunk_task.delay("s1:1").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
+    worker_tasks.extract_chunk_task.delay("default", "s1:1").get()
     assert trigger.calls == 0
     row = db.source_row("s1")
     assert row["status"] == "failed"
@@ -131,8 +131,8 @@ def test_end_to_end_synthesis(clean_graph, tmp_path):
     dirty = cluster_new_claims(ctx)
     processed = process_dirty_concepts(ctx)
     ordered = build_curriculum(ctx)
-    db.set_setting(
-        "synthesis:last_run",
+    db.set_project_setting(
+        "default", "synthesis:last_run",
         json.dumps(
             {
                 "dirty_concepts": len(dirty),
@@ -147,4 +147,4 @@ def test_end_to_end_synthesis(clean_graph, tmp_path):
     assert clean_graph.conflicts_in_concept("k-cl1")[0]["classification"] == "genuine_debate"
     cur = clean_graph.curriculum()
     assert [row["concept_id"] for row in cur][:2] == ["k-cl1", "k-cl3"]
-    assert db.get_setting("synthesis:last_run") is not None
+    assert db.get_project_setting("default", "synthesis:last_run") is not None

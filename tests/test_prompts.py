@@ -31,9 +31,9 @@ def test_synthesis_prompt_keys_and_placeholder():
 
 def test_domain_guidance_and_profile_default(tmp_path):
     db = OpsDB(tmp_path / "ops.db")
-    assert get_domain_profile(db) == "technical"
-    db.set_setting("corpus.domain_profile", "interpretive")
-    assert get_domain_profile(db) == "interpretive"
+    assert get_domain_profile(db, "default") == "technical"
+    db.set_project_setting("default", "corpus.domain_profile", "interpretive")
+    assert get_domain_profile(db, "default") == "interpretive"
     assert "context_dependent" in domain_guidance("technical")
     assert "genuine_debate" in domain_guidance("interpretive")
     with pytest.raises(KeyError):
