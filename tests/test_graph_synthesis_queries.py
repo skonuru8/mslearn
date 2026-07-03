@@ -52,6 +52,14 @@ def test_concept_meta_and_curriculum(clean_graph):
     cur = store.curriculum()
     assert [c["concept_id"] for c in cur] == ["k2", "k1"]
     assert cur[1]["name"] == "Caching"
+    assert [c["conflict_count"] for c in cur] == [0, 0]
+
+    store.assign_claim("cl0", "k1")
+    store.assign_claim("cl1", "k1")
+    store.add_conflict("cl0", "cl1", "outdated", "r")
+    cur = store.curriculum()
+    by_id = {c["concept_id"]: c["conflict_count"] for c in cur}
+    assert by_id == {"k1": 1, "k2": 0}
 
 
 def test_spine_concept_order(clean_graph):

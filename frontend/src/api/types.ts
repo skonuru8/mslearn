@@ -113,6 +113,7 @@ export interface ConceptMeta {
   name: string;
   summary: string;
   order_index: number | null;
+  conflict_count?: number;
   dirty?: boolean;
   teach_md?: string;
   teach_at?: number | null;

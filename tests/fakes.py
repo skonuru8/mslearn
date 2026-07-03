@@ -430,6 +430,12 @@ class InMemoryGraphStore:
                 "name": c.get("name", ""),
                 "summary": c.get("summary", ""),
                 "order_index": c.get("order_index"),
+                "conflict_count": sum(
+                    1
+                    for (a, b) in self.conflicts
+                    if self.claim_to_concept.get(a) == c["concept_id"]
+                    and self.claim_to_concept.get(b) == c["concept_id"]
+                ),
             }
             for c in self.concepts.values()
             if c.get("project_id", "default") == project_id and c.get("order_index") is not None

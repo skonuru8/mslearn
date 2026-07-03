@@ -106,8 +106,23 @@ def test_curriculum_endpoint_returns_store_curriculum(study_client):
             "name": "Cache invalidation",
             "summary": "Know when cached values become stale.",
             "order_index": 0,
+            "conflict_count": 0,
         }
     ]
+
+
+def test_curriculum_carries_conflict_counts(study_client):
+    # The conflict badge feeds straight from the curriculum rows — no
+    # per-concept detail fan-out from the UI.
+    client, graph, _router, _task = study_client
+    graph.add_claim("c2", "Cache invalidation is easy.", "neutral", "s1", [0.9, 0.1])
+    graph.assign_claim("c2", "k1")
+    graph.add_conflict("c1", "c2", "genuine_debate", "hardness dispute")
+
+    response = client.get("/api/study/curriculum")
+
+    assert response.status_code == 200
+    assert response.json()[0]["conflict_count"] == 1
 
 
 def test_concept_endpoint_returns_meta_claims_conflicts_and_citations(study_client):

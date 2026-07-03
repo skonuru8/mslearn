@@ -562,10 +562,16 @@ class GraphStore:
         )
 
     def curriculum(self, *, project_id: str = "default") -> list[dict]:
+        # conflict_count rides along so the UI's conflict badges don't need a
+        # per-concept detail fetch (one aggregate here vs. an N+1 fan-out).
         return self.run_read(
             "MATCH (k:Concept {project_id: $project_id}) WHERE k.order_index IS NOT NULL "
+            "OPTIONAL MATCH (a:Claim {project_id: $project_id})-[c:CONFLICTS_WITH]->"
+            "(b:Claim {project_id: $project_id}), "
+            "(a)-[:IN_CONCEPT]->(k), (b)-[:IN_CONCEPT]->(k) "
             "RETURN k.concept_id AS concept_id, k.name AS name, "
-            "k.summary AS summary, k.order_index AS order_index "
+            "k.summary AS summary, k.order_index AS order_index, "
+            "count(c) AS conflict_count "
             "ORDER BY k.order_index",
             project_id=project_id,
         )

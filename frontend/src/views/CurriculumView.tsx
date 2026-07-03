@@ -8,7 +8,6 @@ import { ErrorBanner, Loading } from "../components/Status";
 export function CurriculumView() {
   const { projectId } = useProject();
   const [concepts, setConcepts] = useState<ConceptMeta[]>([]);
-  const [conflictCounts, setConflictCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,17 +18,6 @@ export function CurriculumView() {
         const rows = await api<ConceptMeta[]>("/api/study/curriculum");
         setConcepts(rows);
         setError(null);
-        const counts: Record<string, number> = {};
-        const results = await Promise.allSettled(
-          rows.map(async (concept) => {
-            const detail = await api<{ conflicts: unknown[] }>(
-              `/api/study/concepts/${encodeURIComponent(concept.concept_id)}`,
-            );
-            counts[concept.concept_id] = detail.conflicts.length;
-          }),
-        );
-        void results;
-        setConflictCounts(counts);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load your course");
       } finally {
@@ -67,8 +55,8 @@ export function CurriculumView() {
                   {concept.order_index ?? "—"}. {concept.name}
                 </strong>
                 <div>{concept.summary}</div>
-                {(conflictCounts[concept.concept_id] ?? 0) > 0 ? (
-                  <span className="badge">{conflictCounts[concept.concept_id]} different views</span>
+                {(concept.conflict_count ?? 0) > 0 ? (
+                  <span className="badge">{concept.conflict_count} different views</span>
                 ) : null}
               </Link>
             </li>
