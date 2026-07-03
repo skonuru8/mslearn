@@ -8,4 +8,12 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .agents/
+.claude/
+.hypothesis/
+.superpowers/
 .DS_Store
+
+.env.example
+
+skills-lock.json
+

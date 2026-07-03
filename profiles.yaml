@@ -5,9 +5,9 @@ profiles:
   openrouter:
     roles:
       extraction:  {provider: ollama,     model: "qwen3.5:9b"}
-      synthesis:   {provider: openrouter, model: "deepseek/deepseek-r1"}
+      synthesis:   {provider: openrouter, model: "deepseek/deepseek-v4-flash"}
       interactive: {provider: openrouter, model: "deepseek/deepseek-chat"}
-      evals:       {provider: openrouter, model: "deepseek/deepseek-r1"}
+      evals:       {provider: openrouter, model: "deepseek/deepseek-v4-flash"}
       embedding:   {provider: ollama,     model: "nomic-embed-text"}
 
   claude-code:
