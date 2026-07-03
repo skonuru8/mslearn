@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -204,6 +205,34 @@ def test_upload_over_size_cap_rejected_413(client, monkeypatch):
     # the partially-written destination file must be cleaned up, not left on disk
     leftovers = list(Path("data/uploads").glob("*toobig.pdf"))
     assert leftovers == []
+
+
+def test_synthesize_reports_worker_online_status(client, monkeypatch):
+    c, _db, _task = client
+    monkeypatch.setattr("mslearn.server.routers.corpus.worker_online", lambda: True)
+    r = c.post("/api/corpus/synthesize")
+    assert r.status_code == 200
+    assert r.json() == {"enqueued": True, "worker_online": True}
+
+    monkeypatch.setattr("mslearn.server.routers.corpus.worker_online", lambda: False)
+    r = c.post("/api/corpus/synthesize")
+    assert r.json() == {"enqueued": True, "worker_online": False}
+
+
+def test_synthesis_status_reflects_last_run_setting(client):
+    c, db, _task = client
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.status_code == 200
+    assert r.json() == {"last_run": None}
+
+    db.set_setting(
+        "synthesis:last_run",
+        json.dumps({"ts": 123, "dirty_concepts": 2, "processed_concepts": 2, "curriculum_len": 5}),
+    )
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json() == {
+        "last_run": {"ts": 123, "dirty_concepts": 2, "processed_concepts": 2, "curriculum_len": 5}
+    }
 
 
 def test_upload_unsupported_suffix_rejected(client):

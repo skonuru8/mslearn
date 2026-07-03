@@ -134,27 +134,48 @@ function handleFrame(
   }
 }
 
-export async function uploadSource(
+/**
+ * Uploads via XMLHttpRequest (not fetch) so the caller can render a real
+ * file-transfer progress bar via `upload.onprogress` — fetch has no
+ * upload-progress event.
+ */
+export function uploadSource(
   file: File,
   role: string,
   local: boolean,
+  onProgress?: (percent: number) => void,
 ): Promise<{ source_id: string; stored_path: string }> {
   const form = new FormData();
   form.append("file", file);
   form.append("role", role);
   form.append("local", String(local));
-  const response = await fetch("/api/corpus/upload", { method: "POST", body: form });
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const body = (await response.json()) as { detail?: string };
-      if (body.detail) {
-        detail = body.detail;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/corpus/upload");
+    xhr.upload.onprogress = (event) => {
+      if (onProgress && event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
       }
-    } catch {
-      // keep statusText
-    }
-    throw new ApiError(detail, response.status);
-  }
-  return (await response.json()) as { source_id: string; stored_path: string };
+    };
+    xhr.onload = () => {
+      let body: unknown;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        body = undefined;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as { source_id: string; stored_path: string });
+        return;
+      }
+      const detail =
+        body && typeof body === "object" && "detail" in body && typeof (body as { detail?: unknown }).detail === "string"
+          ? (body as { detail: string }).detail
+          : xhr.statusText || `upload failed (${xhr.status})`;
+      reject(new ApiError(detail, xhr.status));
+    };
+    xhr.onerror = () => reject(new ApiError("network error during upload", 0));
+    xhr.send(form);
+  });
 }

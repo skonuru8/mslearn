@@ -34,6 +34,46 @@ def test_health(client):
     assert r.json() == {"status": "ok"}
 
 
+def test_health_all_online(client, monkeypatch):
+    import mslearn.server.routers.admin as admin_module
+
+    monkeypatch.setattr(admin_module, "worker_online", lambda: True)
+    monkeypatch.setattr(admin_module, "_redis_online", lambda ctx: True)
+    monkeypatch.setattr(admin_module, "_neo4j_online", lambda ctx: True)
+    c, _ = client
+    r = c.get("/api/admin/health")
+    assert r.status_code == 200
+    assert r.json() == {"api": True, "worker": True, "redis": True, "neo4j": True}
+
+
+def test_health_worker_offline_reported_not_silently_dropped(client, monkeypatch):
+    import mslearn.server.routers.admin as admin_module
+
+    monkeypatch.setattr(admin_module, "worker_online", lambda: False)
+    monkeypatch.setattr(admin_module, "_redis_online", lambda ctx: True)
+    monkeypatch.setattr(admin_module, "_neo4j_online", lambda ctx: True)
+    c, _ = client
+    r = c.get("/api/admin/health")
+    assert r.status_code == 200
+    assert r.json() == {"api": True, "worker": False, "redis": True, "neo4j": True}
+
+
+def test_health_neo4j_ping_failure_reported_as_offline(client, monkeypatch):
+    import mslearn.server.routers.admin as admin_module
+
+    monkeypatch.setattr(admin_module, "worker_online", lambda: True)
+    monkeypatch.setattr(admin_module, "_redis_online", lambda ctx: True)
+    c, _ = client
+    ctx = c.app.state.context
+
+    def boom():
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(ctx.graph, "ping", boom)
+    r = c.get("/api/admin/health")
+    assert r.json()["neo4j"] is False
+
+
 def test_profiles_list_and_switch(client):
     c, db = client
     cfg = load_profiles("profiles.yaml")

@@ -7,9 +7,47 @@ import type {
   IngestResponse,
   RetryFailedResponse,
   SourceRow,
+  SynthesisStatusResponse,
   SynthesizeResponse,
 } from "../api/types";
 import { ErrorBanner, Loading } from "../components/Status";
+
+function isActiveSource(row: SourceRow): boolean {
+  return row.status === "running" || row.status === "chunking";
+}
+
+function progressFraction(row: SourceRow): number {
+  if (row.total_chunks <= 0) {
+    return 0;
+  }
+  return (row.done_chunks + row.failed_chunks + row.rejected_chunks) / row.total_chunks;
+}
+
+function progressLabel(row: SourceRow): string {
+  const done = row.done_chunks + row.failed_chunks + row.rejected_chunks;
+  if (row.status === "chunking") {
+    return "Preparing…";
+  }
+  if (row.status === "running") {
+    let label = `Reading… ${done} of ${row.total_chunks} sections`;
+    if (row.failed_chunks > 0) {
+      label += ` · ${row.failed_chunks} problems`;
+    }
+    return label;
+  }
+  return `${done}/${row.total_chunks}`;
+}
+
+function formatSynthesisAgo(ts: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+  if (minutes < 1) {
+    return "just now";
+  }
+  if (minutes === 1) {
+    return "1 min ago";
+  }
+  return `${minutes} min ago`;
+}
 
 export function CorpusView() {
   const [sources, setSources] = useState<SourceRow[]>([]);
@@ -19,32 +57,60 @@ export function CorpusView() {
   const [ref, setRef] = useState("");
   const [role, setRole] = useState("spine");
   const [sourceType, setSourceType] = useState("");
-  const [local, setLocal] = useState(true);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
   const [failures, setFailures] = useState<Record<string, FailureGroup[]>>({});
+  const [synthMsg, setSynthMsg] = useState<string | null>(null);
+  const [synthesisStatus, setSynthesisStatus] = useState<SynthesisStatusResponse | null>(null);
+
+  const refreshSources = useCallback(async () => {
+    const [rows, profile] = await Promise.all([
+      api<SourceRow[]>("/api/corpus/sources"),
+      api<DomainProfileResponse>("/api/corpus/settings/domain-profile"),
+    ]);
+    setSources(rows);
+    setDomainProfile(profile.profile);
+    return rows;
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [rows, profile] = await Promise.all([
-        api<SourceRow[]>("/api/corpus/sources"),
-        api<DomainProfileResponse>("/api/corpus/settings/domain-profile"),
-      ]);
-      setSources(rows);
-      setDomainProfile(profile.profile);
+      await refreshSources();
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load corpus");
     } finally {
       setLoading(false);
     }
+  }, [refreshSources]);
+
+  const refreshSynthesisStatus = useCallback(async () => {
+    try {
+      setSynthesisStatus(await api<SynthesisStatusResponse>("/api/corpus/synthesis/status"));
+    } catch {
+      setSynthesisStatus(null);
+    }
   }, []);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void refreshSynthesisStatus();
+  }, [load, refreshSynthesisStatus]);
+
+  useEffect(() => {
+    if (!sources.some(isActiveSource)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshSources().catch(() => {
+        /* keep polling; transient errors surface on manual actions */
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [sources, refreshSources]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -55,11 +121,10 @@ export function CorpusView() {
           ref,
           role,
           source_type: sourceType || null,
-          local,
+          local: false,
         }),
       });
-      const rows = await api<SourceRow[]>("/api/corpus/sources");
-      setSources(rows);
+      const rows = await refreshSources();
       const row = rows.find((item) => item.source_id === result.source_id);
       if (row) {
         setSources([row, ...rows.filter((item) => item.source_id !== result.source_id)]);
@@ -78,15 +143,18 @@ export function CorpusView() {
       return;
     }
     setUploading(true);
+    setUploadPercent(0);
     try {
-      await uploadSource(uploadFile, role, local);
+      await uploadSource(uploadFile, role, false, (percent) => setUploadPercent(percent));
       setUploadFile(null);
-      await load();
+      setUploadPercent(null);
+      await refreshSources();
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
+      setUploadPercent(null);
     }
   }
 
@@ -95,7 +163,7 @@ export function CorpusView() {
       await api(`/api/corpus/sources/${encodeURIComponent(sourceId)}/${action}`, {
         method: "POST",
       });
-      await load();
+      await refreshSources();
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${action} failed`);
@@ -139,7 +207,7 @@ export function CorpusView() {
         { method: "POST" },
       );
       setExpandedSource(null);
-      await load();
+      await refreshSources();
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed");
@@ -147,8 +215,16 @@ export function CorpusView() {
   }
 
   async function onSynthesize() {
+    setSynthMsg(null);
     try {
-      await api<SynthesizeResponse>("/api/corpus/synthesize", { method: "POST" });
+      const result = await api<SynthesizeResponse>("/api/corpus/synthesize", { method: "POST" });
+      if (!result.worker_online) {
+        setSynthMsg(
+          "Worker offline — synthesis was queued but nothing will process it. Start the worker (make worker or make run) and try again.",
+        );
+      } else {
+        setSynthMsg("Synthesis queued — the background worker will process it shortly.");
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Synthesis enqueue failed");
@@ -158,6 +234,8 @@ export function CorpusView() {
   if (loading) {
     return <Loading />;
   }
+
+  const lastRun = synthesisStatus?.last_run;
 
   return (
     <section className="panel">
@@ -173,6 +251,12 @@ export function CorpusView() {
             onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
           />
         </label>
+        {uploadPercent !== null ? (
+          <div className="upload-progress">
+            <progress max={100} value={uploadPercent} />
+            <span>Uploading… {uploadPercent}%</span>
+          </div>
+        ) : null}
         <button type="submit" className="primary" disabled={!uploadFile || uploading}>
           {uploading ? "Uploading…" : "Upload & ingest"}
         </button>
@@ -201,10 +285,6 @@ export function CorpusView() {
             <option value="audio">audio</option>
           </select>
         </label>
-        <label>
-          <input type="checkbox" checked={local} onChange={(event) => setLocal(event.target.checked)} />
-          Run ingest locally (eager Celery)
-        </label>
         <button type="submit" className="primary">
           Add source
         </button>
@@ -225,6 +305,13 @@ export function CorpusView() {
           Run synthesis
         </button>
       </p>
+      {synthMsg ? <div className={`synth-notice ${synthMsg.includes("offline") ? "warn" : ""}`}>{synthMsg}</div> : null}
+      {lastRun ? (
+        <p className="hint">
+          Last synthesis: {lastRun.processed_concepts} concepts updated, curriculum length{" "}
+          {lastRun.curriculum_len} ({formatSynthesisAgo(lastRun.ts)})
+        </p>
+      ) : null}
 
       <table style={{ marginTop: "1rem" }}>
         <thead>
@@ -247,18 +334,29 @@ export function CorpusView() {
                   {row.error ? <div className="hint">{row.error}</div> : null}
                 </td>
                 <td>
-                  {row.done_chunks + row.failed_chunks + row.rejected_chunks}/{row.total_chunks}
-                  {row.failed_chunks > 0 ? (
-                    <>
-                      {" "}
-                      <button type="button" onClick={() => void toggleFailures(row.source_id)}>
-                        {row.failed_chunks} failed — why?
-                      </button>
-                    </>
+                  {isActiveSource(row) ? (
+                    <div className="ingest-progress">
+                      <progress max={1} value={progressFraction(row)} />
+                      <span>{progressLabel(row)}</span>
+                    </div>
                   ) : (
-                    ""
+                    <>
+                      {row.done_chunks + row.failed_chunks + row.rejected_chunks}/{row.total_chunks}
+                      {row.failed_chunks > 0 ? (
+                        <>
+                          {" "}
+                          <button type="button" onClick={() => void toggleFailures(row.source_id)}>
+                            {row.failed_chunks} failed — why?
+                          </button>
+                        </>
+                      ) : (
+                        ""
+                      )}
+                      {row.rejected_chunks > 0
+                        ? ` (${row.rejected_chunks} had no trustworthy content)`
+                        : ""}
+                    </>
                   )}
-                  {row.rejected_chunks > 0 ? ` (${row.rejected_chunks} had no trustworthy content)` : ""}
                 </td>
                 <td>
                   {row.status === "paused" ? (

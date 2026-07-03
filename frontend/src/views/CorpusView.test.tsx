@@ -9,12 +9,18 @@ function wrap(ui: ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
 
+function corpusBootMocks(fetchMock: ReturnType<typeof vi.fn>, sources: unknown[] = []) {
+  fetchMock
+    .mockResolvedValueOnce({ ok: true, json: async () => sources })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ last_run: null }) });
+}
+
 describe("CorpusView", () => {
   it("posts add-source payload and shows new row", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) })
+    const fetchMock = vi.fn();
+    corpusBootMocks(fetchMock);
+    fetchMock
       .mockResolvedValueOnce({ ok: true, json: async () => ({ source_id: "s-new" }) })
       .mockResolvedValueOnce({
         ok: true,
@@ -23,7 +29,7 @@ describe("CorpusView", () => {
             source_id: "s-new",
             ref: "/tmp/book.pdf",
             role: "spine",
-            status: "running",
+            status: "registered",
             total_chunks: 3,
             done_chunks: 0,
             failed_chunks: 0,
@@ -32,7 +38,8 @@ describe("CorpusView", () => {
             ts: 1,
           },
         ],
-      });
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) });
     vi.stubGlobal("fetch", fetchMock);
 
     wrap(<CorpusView />);
@@ -50,7 +57,7 @@ describe("CorpusView", () => {
             ref: "/tmp/book.pdf",
             role: "spine",
             source_type: null,
-            local: true,
+            local: false,
           }),
         }),
       );
@@ -58,27 +65,46 @@ describe("CorpusView", () => {
     await screen.findByText("/tmp/book.pdf");
   });
 
+  it("renders ingestion progress for a running source", async () => {
+    const fetchMock = vi.fn();
+    corpusBootMocks(fetchMock, [
+      {
+        source_id: "s1",
+        ref: "a.pdf",
+        role: "spine",
+        status: "running",
+        total_chunks: 10,
+        done_chunks: 3,
+        failed_chunks: 1,
+        rejected_chunks: 0,
+        error: null,
+        ts: 1,
+      },
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+
+    wrap(<CorpusView />);
+    await screen.findByText(/Reading… 4 of 10 sections · 1 problems/);
+    expect(screen.getByRole("progressbar")).toBeTruthy();
+  });
+
   it("calls pause endpoint", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => [
-          {
-            source_id: "s1",
-            ref: "a.pdf",
-            role: "spine",
-            status: "running",
-            total_chunks: 1,
-            done_chunks: 0,
-            failed_chunks: 0,
-            rejected_chunks: 0,
-            error: null,
-            ts: 1,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) })
+    const fetchMock = vi.fn();
+    corpusBootMocks(fetchMock, [
+      {
+        source_id: "s1",
+        ref: "a.pdf",
+        role: "spine",
+        status: "running",
+        total_chunks: 1,
+        done_chunks: 0,
+        failed_chunks: 0,
+        rejected_chunks: 0,
+        error: null,
+        ts: 1,
+      },
+    ]);
+    fetchMock
       .mockResolvedValueOnce({ ok: true, json: async () => ({ source_id: "s1", status: "paused" }) })
       .mockResolvedValueOnce({
         ok: true,
@@ -117,7 +143,7 @@ describe("CorpusView", () => {
       source_id: "s1",
       ref: "a.pdf",
       role: "spine",
-      status: "running",
+      status: "paused",
       total_chunks: 4,
       done_chunks: 2,
       failed_chunks: 2,
@@ -125,10 +151,9 @@ describe("CorpusView", () => {
       error: null,
       ts: 1,
     };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => [row] })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) })
+    const fetchMock = vi.fn();
+    corpusBootMocks(fetchMock, [row]);
+    fetchMock
       .mockResolvedValueOnce({
         ok: true,
         json: async () => [
@@ -158,17 +183,30 @@ describe("CorpusView", () => {
     });
   });
 
+  it("warns when synthesis is enqueued but the worker is offline", async () => {
+    const fetchMock = vi.fn();
+    corpusBootMocks(fetchMock);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ enqueued: true, worker_online: false }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    wrap(<CorpusView />);
+    await screen.findByText("Corpus");
+    await userEvent.click(screen.getByRole("button", { name: "Run synthesis" }));
+    await screen.findByText(/Worker offline/);
+  });
+
   it("shows error banner on 422 ingest", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => [] })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        statusText: "Unprocessable Entity",
-        json: async () => ({ detail: "failed to load '/bad'" }),
-      });
+    const fetchMock = vi.fn();
+    corpusBootMocks(fetchMock);
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      statusText: "Unprocessable Entity",
+      json: async () => ({ detail: "failed to load '/bad'" }),
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     wrap(<CorpusView />);

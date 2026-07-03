@@ -1,5 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, api, parseSseBuffer } from "./client";
+import { ApiError, api, parseSseBuffer, uploadSource } from "./client";
+
+function makeFakeXHRClass(status: number, response: unknown, statusText = "OK") {
+  return class FakeXHR {
+    upload: {
+      onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null;
+    } = { onprogress: null };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    status = status;
+    statusText = statusText;
+    responseText = "";
+
+    open(_method: string, _url: string): void {}
+
+    send(_body: FormData): void {
+      this.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 });
+      this.upload.onprogress?.({ lengthComputable: true, loaded: 100, total: 100 });
+      this.responseText = JSON.stringify(response);
+      this.onload?.();
+    }
+  };
+}
 
 describe("parseSseBuffer", () => {
   it("parses delta and done frames", () => {
@@ -41,6 +63,38 @@ describe("api", () => {
       expect.objectContaining({ message: "bad ref", status: 422 }),
     );
     expect(await api("/api/corpus/sources").catch((e) => e)).toBeInstanceOf(ApiError);
+  });
+});
+
+describe("uploadSource", () => {
+  it("reports transfer progress via XHR and resolves with the response body", async () => {
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      makeFakeXHRClass(200, { source_id: "s1", stored_path: "/tmp/a.pdf" }) as unknown as typeof XMLHttpRequest,
+    );
+    const progress: number[] = [];
+    const result = await uploadSource(
+      new File(["x"], "a.pdf"),
+      "spine",
+      false,
+      (percent) => progress.push(percent),
+    );
+    expect(result).toEqual({ source_id: "s1", stored_path: "/tmp/a.pdf" });
+    expect(progress).toEqual([50, 100]);
+  });
+
+  it("rejects with the backend detail on a non-2xx status", async () => {
+    vi.stubGlobal(
+      "XMLHttpRequest",
+      makeFakeXHRClass(
+        413,
+        { detail: "file exceeds the 500 MB upload limit" },
+        "Payload Too Large",
+      ) as unknown as typeof XMLHttpRequest,
+    );
+    await expect(uploadSource(new File(["x"], "big.pdf"), "spine", false)).rejects.toEqual(
+      expect.objectContaining({ message: "file exceeds the 500 MB upload limit", status: 413 }),
+    );
   });
 });
 

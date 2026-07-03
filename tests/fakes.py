@@ -61,6 +61,9 @@ class InMemoryGraphStore:
         self.sources: dict[str, dict] = {}
         self.chunks: dict[str, dict] = {}
 
+    def ping(self) -> None:
+        """No-op: the fake graph store is always "reachable"."""
+
     def upsert_source(self, doc) -> None:
         self.sources[doc.source_id] = {
             "source_id": doc.source_id,

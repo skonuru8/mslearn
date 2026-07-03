@@ -57,6 +57,7 @@ export interface DomainProfileResponse {
 
 export interface SynthesizeResponse {
   enqueued: boolean;
+  worker_online: boolean;
 }
 
 export interface FailureGroup {
@@ -69,6 +70,22 @@ export interface RetryFailedResponse {
   source_id: string;
   status: string;
   retried_chunks: number;
+}
+
+export interface HealthResponse {
+  api: boolean;
+  worker: boolean;
+  redis: boolean;
+  neo4j: boolean;
+}
+
+export interface SynthesisStatusResponse {
+  last_run: {
+    ts: number;
+    dirty_concepts: number;
+    processed_concepts: number;
+    curriculum_len: number;
+  } | null;
 }
 
 export interface ConceptMeta {

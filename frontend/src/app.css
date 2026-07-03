@@ -144,6 +144,58 @@ td {
   border-bottom: 1px solid #e5e7eb;
 }
 
+.worker-chip {
+  font-size: 0.82rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.worker-chip.online {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+}
+
+.worker-chip.offline {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.upload-progress,
+.ingest-progress {
+  display: grid;
+  gap: 0.25rem;
+  max-width: 280px;
+}
+
+.upload-progress progress,
+.ingest-progress progress {
+  width: 100%;
+  height: 0.55rem;
+}
+
+.synth-notice {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.synth-notice.warn {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
 .badge {
   display: inline-block;
   padding: 0.1rem 0.45rem;

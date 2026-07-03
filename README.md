@@ -79,14 +79,20 @@ make ui-build               # build the web UI once
 
 ### Every time you use it — three things must be running
 ```bash
+make run        # starts all three below, in order, Ctrl-C stops the worker + API
+```
+Or run them separately (useful for debugging one process at a time):
+```bash
 make services   # 1. Redis + Neo4j containers (browser: http://localhost:7474)
 make worker     # 2. background worker — DOES THE ACTUAL READING/INGESTION
 make serve      # 3. web app → http://localhost:8000
 ```
 
-> **Important:** `make serve` alone is not enough. Without `make worker`,
+> **Important:** `make serve` alone is not enough. Without a worker running,
 > uploaded sources sit in the queue forever and **Run synthesis does nothing** —
-> the button only *enqueues* a job; the worker is what executes it.
+> the button only *enqueues* a job; the worker is what executes it. The app
+> header shows a "Background worker running" / "Worker offline" chip
+> (`GET /api/admin/health`) so this is never silent.
 
 ### Using the web app
 - **Corpus** page: upload a file or paste a URL (blog/YouTube). Role

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { ExportResponse, ProfileInfo, SpendSummary } from "../api/types";
+import type { ExportResponse, HealthResponse, ProfileInfo, SpendSummary } from "../api/types";
 import { ErrorBanner } from "./Status";
 
 export function AdminBar() {
   const [profiles, setProfiles] = useState<ProfileInfo | null>(null);
   const [spend, setSpend] = useState<SpendSummary | null>(null);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -27,12 +28,25 @@ export function AdminBar() {
     }
   }, []);
 
+  const refreshHealth = useCallback(async () => {
+    try {
+      setHealth(await api<HealthResponse>("/api/admin/health"));
+    } catch {
+      setHealth(null);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshProfiles();
     void refreshSpend();
-    const timer = window.setInterval(() => void refreshSpend(), 30_000);
-    return () => window.clearInterval(timer);
-  }, [refreshProfiles, refreshSpend]);
+    void refreshHealth();
+    const spendTimer = window.setInterval(() => void refreshSpend(), 30_000);
+    const healthTimer = window.setInterval(() => void refreshHealth(), 15_000);
+    return () => {
+      window.clearInterval(spendTimer);
+      window.clearInterval(healthTimer);
+    };
+  }, [refreshProfiles, refreshSpend, refreshHealth]);
 
   async function onProfileChange(name: string) {
     try {
@@ -68,6 +82,14 @@ export function AdminBar() {
     <div>
       <div className="admin-bar">
         <strong>mslearn</strong>
+        <span
+          className={`worker-chip ${health?.worker ? "online" : "offline"}`}
+          title="Background jobs (ingestion, synthesis) need a Celery worker process running alongside the API. See README.md (scripts/dev_up.sh / make run)."
+        >
+          {health?.worker
+            ? "Background worker running"
+            : "Worker offline — sources won't process, synthesis won't run"}
+        </span>
         <label>
           Profile
           <select

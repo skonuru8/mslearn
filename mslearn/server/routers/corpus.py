@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from contextlib import contextmanager
@@ -10,6 +11,7 @@ from mslearn.pipeline.orchestrator import IngestError, ingest_source, resume_pen
 from mslearn.prompts import get_domain_profile
 from mslearn.server.deps import get_ctx
 from mslearn.worker.app import app as celery_app
+from mslearn.worker.app import worker_online
 from mslearn.worker.tasks import synthesize_task
 
 router = APIRouter(prefix="/api/corpus", tags=["corpus"])
@@ -195,4 +197,10 @@ def set_domain_profile(body: DomainProfileUpdate, ctx=Depends(get_ctx)):
 @router.post("/synthesize")
 def enqueue_synthesis(ctx=Depends(get_ctx)):
     synthesize_task.delay()
-    return {"enqueued": True}
+    return {"enqueued": True, "worker_online": worker_online()}
+
+
+@router.get("/synthesis/status")
+def synthesis_status(ctx=Depends(get_ctx)):
+    raw = ctx.db.get_setting("synthesis:last_run")
+    return {"last_run": json.loads(raw) if raw is not None else None}

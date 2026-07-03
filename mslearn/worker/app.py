@@ -23,3 +23,14 @@ def _init_worker_process(**_kwargs):
     from mslearn.worker.context import build_default_context, set_context
 
     set_context(build_default_context())
+
+
+def worker_online(timeout: float = 1.0) -> bool:
+    """Best-effort check for a live Celery worker (used by /api/admin/health
+    and the synthesize/synthesis-status endpoints so the UI can say plainly
+    "worker offline" instead of silently no-op'ing an enqueue)."""
+    try:
+        pong = app.control.ping(timeout=timeout)
+    except Exception:
+        return False
+    return bool(pong)

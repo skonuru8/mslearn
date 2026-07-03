@@ -4,8 +4,42 @@ from pydantic import BaseModel
 from mslearn.opsdb import TUNABLE_DEFAULTS
 from mslearn.profiles import get_active_profile_name, load_profiles, set_active_profile_name
 from mslearn.server.deps import get_ctx
+from mslearn.worker.app import worker_online
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+@router.get("/health")
+def health(ctx=Depends(get_ctx)):
+    return {
+        "api": True,
+        "worker": worker_online(),
+        "redis": _redis_online(ctx),
+        "neo4j": _neo4j_online(ctx),
+    }
+
+
+def _redis_online(ctx) -> bool:
+    try:
+        import redis
+
+        url = getattr(getattr(ctx, "settings", None), "redis_url", None)
+        if not url:
+            from mslearn.settings import get_settings
+
+            url = get_settings().redis_url
+        client = redis.Redis.from_url(url, socket_connect_timeout=1, socket_timeout=1)
+        return bool(client.ping())
+    except Exception:
+        return False
+
+
+def _neo4j_online(ctx) -> bool:
+    try:
+        ctx.graph.ping()
+        return True
+    except Exception:
+        return False
 
 
 @router.get("/profiles")
