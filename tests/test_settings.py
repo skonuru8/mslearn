@@ -7,7 +7,7 @@ def test_defaults():
     s = Settings(_env_file=None)
     assert s.data_dir == Path("data")
     assert s.ops_db == Path("data") / "ops.db"
-    assert s.redis_url == "redis://localhost:6379/0"
+    assert s.redis_url == "redis://localhost:6380/0"
     assert s.neo4j_uri == "bolt://localhost:7687"
     assert s.ollama_base_url == "http://localhost:11434"
 

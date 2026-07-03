@@ -2,7 +2,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"  # host 6380 avoids clashing with other local Redis on 6379
     # Broker only — no persistence volume on purpose; durable state lives in SQLite/Neo4j.
 
   neo4j:

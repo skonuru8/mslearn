@@ -49,9 +49,9 @@ def request():
 def test_routes_by_active_profile_role(env):
     cfg, db, fakes, router = env
     resp = router.complete("extraction", request())
-    assert resp.provider == "ollama" and resp.model == "qwen3.5:9b"
+    assert resp.provider == "openrouter" and resp.model == "deepseek/deepseek-v4-flash"
     resp = router.complete("synthesis", request())
-    assert resp.provider == "openrouter" and resp.model == "deepseek/deepseek-r1"
+    assert resp.provider == "openrouter" and resp.model == "deepseek/deepseek-v4-flash"
 
 
 def test_profile_switch_changes_routing(env):

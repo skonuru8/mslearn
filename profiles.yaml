@@ -4,7 +4,7 @@ default_profile: openrouter
 profiles:
   openrouter:
     roles:
-      extraction:  {provider: ollama,     model: "qwen3.5:9b"}
+      extraction:  {provider: openrouter,     model: "deepseek/deepseek-v4-flash"}
       synthesis:   {provider: openrouter, model: "deepseek/deepseek-v4-flash"}
       interactive: {provider: openrouter, model: "deepseek/deepseek-chat"}
       evals:       {provider: openrouter, model: "deepseek/deepseek-v4-flash"}

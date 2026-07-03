@@ -10,7 +10,7 @@ def compose():
 def test_redis_service_defined():
     svc = compose()["services"]["redis"]
     assert svc["image"].startswith("redis:7")
-    assert "6379:6379" in svc["ports"]
+    assert "6380:6379" in svc["ports"]
 
 
 def test_neo4j_service_defined_with_apoc():

@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("data")
     profiles_path: Path = Path("profiles.yaml")
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://localhost:6380/0"
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "learnsys"

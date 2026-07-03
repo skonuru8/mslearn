@@ -1,137 +1,178 @@
 # mslearn — Personal Multi-Source Learning System
 
-Turns your books, blogs, YouTube playlists, and podcasts into a trust-gated
-concept graph with cross-source conflict classification, teaching, quizzes,
-and portable Markdown/Anki exports.
+Turn the things you want to learn from — **books (PDF/EPUB), blog posts, YouTube
+videos, and podcasts/audio** — into one connected study guide. The app reads
+your sources, pulls out individual factual claims (each one backed by a
+verbatim quote so nothing is made up), groups them into concepts, spots where
+your sources **disagree with each other**, and then teaches you, quizzes you,
+and exports notes/Anki flashcards.
 
 Spec: `docs/superpowers/specs/2026-07-02-multi-source-learning-system-design.md`
 
-## Prerequisites
-- Python 3.12+, Docker, [Ollama](https://ollama.com) with models pulled:
+---
+
+## What the app does, in plain words
+
+1. **You add sources.** Upload a PDF from your computer, or paste a link to a
+   blog post or YouTube video.
+2. **The app reads them in the background.** Each source is split into small
+   chunks. A model extracts claims from each chunk. A *trust gate* rejects any
+   claim whose supporting quote isn't literally in the text — this is the
+   anti-hallucination guarantee.
+3. **Synthesis builds the map.** Claims that say the same thing get grouped
+   into a concept. Concepts get ordered into a curriculum (what to learn
+   first). When two sources disagree, the conflict is kept and classified
+   (outdated vs. genuine debate vs. context-dependent vs. evidence mismatch) —
+   never silently merged.
+4. **You study.** Browse the curriculum, read generated teaching (every factual
+   sentence carries a `[claim:…]` citation you can click), take reasoning
+   quizzes graded with explanations, or just chat with your corpus. The app
+   remembers what confused you and adapts.
+5. **You export.** Markdown notes, Anki `.apkg` decks, and a full graph dump
+   (GraphML + JSON) so your knowledge is never locked in.
+
+## Example scenarios
+
+**Scenario 1 — study a course PDF.**
+You upload `algorithms-lecture-notes.pdf` as your **main source**. The app
+chunks it, extracts claims ("Merge sort runs in O(n log n) time" with the exact
+supporting quote), and builds concepts like *Asymptotic notation* →
+*Divide-and-conquer* → *Merge sort*, ordered so prerequisites come first. You
+open a concept, read the teaching page, hit **Quiz me**, answer in free text,
+and get graded with an explanation citing the exact claims.
+
+**Scenario 2 — book + YouTube disagree.**
+You add a nutrition book as the main source, then paste three YouTube links as
+extra material. One video says "eat within an 8-hour window"; the book says
+timing barely matters vs. total intake. The app puts both claims in the same
+concept, marks a **conflict (genuine debate)**, and every teaching page for
+that concept shows a "Where sources disagree" section presenting both sides
+with citations — instead of pretending there's one answer.
+
+**Scenario 3 — flag a bad claim.**
+Reading a teaching page you spot a claim that's wrong or out of context. Click
+**Flag**, give a reason. The claim is quarantined, the affected concept is
+marked dirty and regenerated without it. Your flag also feeds the eval golden
+sets.
+
+**Scenario 4 — exam-week export.**
+Before an exam you hit **Export** → get per-concept Markdown notes and an Anki
+deck with stable card IDs (re-export never duplicates cards), plus the graph
+dump. All deterministic — no model calls needed, works offline.
+
+---
+
+## Running the app
+
+### Prerequisites
+- Python 3.12+, Node 20+, Docker Desktop
+- [Ollama](https://ollama.com) with models pulled:
   `ollama pull qwen3.5:9b && ollama pull nomic-embed-text`
 - An OpenRouter API key (default profile) and/or Claude Code installed
 
-## Setup
-    python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-    cp .env.example .env   # fill in MSL_OPENROUTER_API_KEY
-    make services          # starts Redis + Neo4j (browser: http://localhost:7474)
+### One-time setup
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+cp .env.example .env        # fill in MSL_OPENROUTER_API_KEY
+make ui-build               # build the web UI once
+```
 
-## Verify
-    make check                                    # lint + offline test suite
-    .venv/bin/python scripts/smoke_providers.py   # live local-provider smoke
-    .venv/bin/python scripts/smoke_providers.py interactive   # + OpenRouter
+### Every time you use it — three things must be running
+```bash
+make services   # 1. Redis + Neo4j containers (browser: http://localhost:7474)
+make worker     # 2. background worker — DOES THE ACTUAL READING/INGESTION
+make serve      # 3. web app → http://localhost:8000
+```
 
-## Backend profiles
-Model routing lives in `profiles.yaml` (profiles: `openrouter` default,
-`claude-code`, `offline`). Model IDs are config-only — edit the YAML to bump.
+> **Important:** `make serve` alone is not enough. Without `make worker`,
+> uploaded sources sit in the queue forever and **Run synthesis does nothing** —
+> the button only *enqueues* a job; the worker is what executes it.
 
-## Sources
+### Using the web app
+- **Corpus** page: upload a file or paste a URL (blog/YouTube). Role
+  `spine` = your main source (its structure drives curriculum order);
+  `supplement` = extra material that attaches to existing concepts.
+  The progress column shows `done+failed/total` chunks per source.
+- **Run synthesis**: builds/updates concepts + curriculum from extracted
+  claims. Runs automatically when a source finishes; the button forces a pass.
+  Needs the worker running and at least some trusted claims in the graph.
+- **Curriculum / Concept** pages: ordered concepts, teaching with citations,
+  conflict callouts, flagging.
+- **Quiz**: free-text answers, graded with explanations, results feed memory.
+- **Chat**: streaming Q&A over your corpus only — it will say "insufficient
+  material" rather than invent an answer.
+- **Memory** page: inspect/delete everything the app has learned about *you*
+  (weak spots, preferences). Memory personalizes; it never supplies facts.
+- **Admin** page: model spend/latency log, profile switch, tunable audit.
 
-`load_source(ref)` ingests any supported source into a normalized `SourceDocument`:
-PDF/EPUB books (page/href citations), blog URLs or saved HTML (trafilatura),
-YouTube videos (captions, whisper fallback), and audio files (faster-whisper).
-`chunk_source(doc)` packs it into ≤500-token chunks with locators preserved.
-Audio/caption-less-video ingestion downloads a Whisper model on first use.
+### Switching model backends
+`profiles.yaml` defines named profiles: `openrouter` (default),
+`claude-code`, `offline` (all-local via Ollama). Switch in the Admin UI or set
+`MSL_PROFILE`. Model IDs live only in the YAML.
 
-## Concept graph
+### Command-line alternatives
+```bash
+python -m mslearn.ingest_cli <file-or-url> --role spine --local  # ingest inline
+python -m mslearn.synth_cli --local                              # synthesis inline
+```
+`--local` runs everything in-process (no worker needed) — fine for one small
+source, slow for big ones.
 
-Neo4j holds the knowledge graph (browser: http://localhost:7474). `GraphStore`
-owns all Cypher: schema/vector indexes, source/chunk/claim upserts, concepts
-with `DEPENDS_ON` and classified `CONFLICTS_WITH` edges, vector search, and
-portable GraphML/JSON export (embeddings excluded). Integration tests need
-`make services`; they skip cleanly when Neo4j is down (`make graph-test`).
+## Troubleshooting
 
-## Ingestion
+| Symptom | Cause | Fix |
+|---|---|---|
+| Progress stuck at `0/N` | worker not running | `make worker` |
+| `X failed` in progress column | extraction/model errors on those chunks | check source error (Corpus row), Admin → model calls log |
+| `invalid JSON from ollama: ''` | model output truncated (thinking models spend the token budget before answering) | raise extraction max-tokens tunable; see plan `2026-07-03-09` |
+| Source `paused` by itself | failure-rate monitor tripped (too many chunks failing) | fix the underlying error, then hit Resume |
+| Run synthesis does nothing | no worker, or zero trusted claims yet | start worker; confirm ingestion produced claims |
+| Chat answers "insufficient material" | corpus has no claims relevant to the question | ingest more sources / check ingestion succeeded |
+| Neo4j warning spam in server logs | queries against an empty graph (missing labels/properties) | harmless when corpus is empty; noise suppression tracked in plan |
 
-`python -m mslearn.ingest_cli <ref> --role spine --local` ingests one source
-inline (adapter → chunks → claim extraction → trust gate → Neo4j). Production
-mode: `make services`, `make worker`, then enqueue without `--local`. Jobs are
-durable in SQLite — `resume_pending()` re-enqueues after a crash; a source
-whose chunks fail past the failure-rate tunable is paused, never retried
-blindly. Thresholds and prompts are tunables (audited) — the eval loop adjusts
-them; see the spec's self-evolution section.
+## Development
 
-## Synthesis
+```bash
+make check        # ruff + full offline pytest suite
+make graph-test   # Neo4j integration tests (starts container)
+make ui-test      # frontend vitest suite
+cd frontend && npm run dev   # hot-reload UI on :5173 (proxies /api to :8000)
+```
 
-When a source finishes (all chunks `done` or `failed`), the worker marks it
-`done` and enqueues `synthesize_task` on the `judge` queue. Synthesis runs in
-three incremental phases: cluster unassigned trusted claims into concepts,
-process dirty concepts for conflict classification + naming, then rebuild the
-curriculum order.
+## Evals — definition of done
 
-Domain profile steers conflict classification:
-- `corpus.domain_profile=technical` (default): prefer `context_dependent`
-- `corpus.domain_profile=interpretive`: prefer `genuine_debate`
+Golden sets live in `evals/golden/*.jsonl` (rows with review status
+`approved`/`corrected` only; seed + review via the UI eval pages).
 
-Core tunables:
-- `synth.candidate_k` (default `8.0`)
-- `synth.similarity_floor` (default `0.75`)
+```bash
+.venv/bin/python -m mslearn.evals.run --offline     # CI-safe metric run
+.venv/bin/python -m mslearn.evals.run               # + judged provenance
+.venv/bin/python -m mslearn.evals.evolve_cli --once # eval-gated self-evolution
+bash scripts/release_check.sh                       # full release harness
+```
 
-Run manually: `python -m mslearn.synth_cli [--local]`.
-For stable scheduling, keep judge queue concurrency low (often `1`) so
-synthesis passes serialize cleanly.
+Release gates (spec §6): extraction P/R ≥ 0.90/0.85, grounding false-accept
+≤ 2%, clustering F1 ≥ 0.80, tension accuracy ≥ 0.75, schema validity ≥ 0.99,
+provenance violations = 0. Self-evolution proposals are accepted only if the
+target metric improves **and** no gate regresses; every change is audited and
+rollbackable (`POST /api/admin/tunables/{key}/rollback`).
 
-## Server and exports
+## Architecture notes (for contributors)
 
-Run the API with `make serve` or:
-
-    .venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000
-
-`GET /api/memory` lists learner-memory items and
-`DELETE /api/memory/{memory_id}` removes one. Both return `503` when learner
-memory is unavailable, such as when mem0 is not installed or configured.
-
-`POST /api/exports` with `{"kinds":["markdown","anki","graph"]}` writes files
-under `data/exports/<timestamp>/`. Markdown exports are deterministic and use
-cached teaching Markdown when present; otherwise they render summaries, claims,
-quotes, conflicts, and citation footnotes directly from the graph. Anki exports
-use stable deck/model IDs, and graph exports include both GraphML and JSON.
-
-If `frontend/dist` exists, the API serves it at `/` after all API routers are
-registered, so `/api/*` routes continue to take precedence.
-
-## Frontend
-
-The React UI lives in `frontend/` (Vite + TypeScript). During development, run
-the API and Vite dev server separately — Vite proxies `/api` to port 8000:
-
-    make serve                 # terminal 1
-    cd frontend && npm run dev # terminal 2 → http://localhost:5173
-
-Build for production (served by FastAPI from `frontend/dist`):
-
-    make ui-build              # or: cd frontend && npm run build
-    make serve
-
-Frontend tests:
-
-    make ui-test               # or: cd frontend && npm test
-
-## Evals and definition of done
-
-Golden sets live in `evals/golden/*.jsonl` (review status `approved`/`corrected`
-only). Component metrics + release gates:
-
-    .venv/bin/python -m mslearn.evals.run --offline   # CI-safe metric run
-    .venv/bin/python -m mslearn.evals.run               # includes judged provenance
-    .venv/bin/python -m mslearn.evals.evolve_cli --once # eval-gated self-evolution
-
-API: `GET /api/evals/report`, `GET /api/evals/history`, golden review queue at
-`GET /api/evals/golden/{kind}`, `POST /api/evals/evolve`, tunable rollback at
-`POST /api/admin/tunables/{key}/rollback`.
-
-Release gates (spec §6): extraction P/R ≥ 0.90/0.85, grounding false-accept ≤ 2%,
-clustering F1 ≥ 0.80, tension accuracy ≥ 0.75, schema validity ≥ 0.99,
-provenance violations = 0.
-
-Full harness:
-
-    bash scripts/release_check.sh
-
-Spec verification mapping:
-1. `make services && make serve` + `cd frontend && npm run dev` — stack up
-2. `python scripts/make_smoke_corpus.py` then ingest smoke corpus via UI/API
-3. Profile switch + Q&A/quiz/memory — manual via UI
-4. `make check` — offline pytest (225+ tests)
-5. `python -m mslearn.evals.run` — release gates (live backends for judged paths)
-6. Worker kill/resume — manual resilience check
+- **Adapters** (`mslearn/adapters/`): PDF (PyMuPDF), EPUB (ebooklib), blog
+  (trafilatura), YouTube (youtube-transcript-api → yt-dlp+Whisper fallback),
+  audio (faster-whisper). All normalize to `SourceDocument` with locators.
+- **Trust gate** (`mslearn/pipeline/trust.py`): rapidfuzz verbatim-quote check
+  + embedding cosine sanity. Thresholds are audited tunables.
+- **Graph** (`mslearn/graph/store.py`): all Cypher lives here. Labels
+  `Source/Chunk/Claim/Concept`; edges `EXTRACTED_FROM/IN_CONCEPT/DEPENDS_ON/
+  CONFLICTS_WITH{classification}`; native vector indexes (768-dim).
+- **Pipeline** (`mslearn/pipeline/`): LangGraph extraction graph
+  (extract→validate→retry→escalate), synthesis (vector-blocked clustering with
+  judge verdicts → conflict scan → Kahn topological curriculum).
+- **Workers** (`mslearn/worker/`): Celery queues `ingest`/`judge`, per-process
+  context (fork-safe), durable chunk jobs in SQLite (`data/ops.db`, WAL).
+- **Providers** (`mslearn/providers/`): Ollama / OpenRouter / Claude Code
+  behind one `ModelProvider` interface; every call logged to `model_calls`.
+- **Memory** (`mslearn/memory/`): mem0 on the same Neo4j, personalization
+  only — an eval gate asserts no generated fact originates from memory.
