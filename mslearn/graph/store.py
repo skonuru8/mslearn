@@ -1,8 +1,19 @@
+import logging
 import time
 
+import neo4j
 from neo4j import GraphDatabase
 
 from mslearn.graph.records import validate_classification
+
+# neo4j python driver >= 5.7 accepts notifications_min_severity to stop the
+# driver from spamming stdout with GqlStatusObject warnings for every query
+# that touches a label/property that doesn't exist yet (e.g. an empty graph).
+# Harmless but drowns real logs. Fall back to suppressing the notifications
+# logger if an older driver doesn't support the kwarg.
+_SUPPORTS_MIN_SEVERITY = tuple(int(p) for p in neo4j.__version__.split(".")[:2]) >= (5, 7)
+if not _SUPPORTS_MIN_SEVERITY:
+    logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 _CONSTRAINTS = [
     "CREATE CONSTRAINT source_id IF NOT EXISTS FOR (n:Source) REQUIRE n.source_id IS UNIQUE",
@@ -24,7 +35,8 @@ class GraphWriteError(Exception):
 
 class GraphStore:
     def __init__(self, uri: str, user: str, password: str, embedding_dim: int = 768):
-        self._driver = GraphDatabase.driver(uri, auth=(user, password))
+        driver_kwargs = {"notifications_min_severity": "OFF"} if _SUPPORTS_MIN_SEVERITY else {}
+        self._driver = GraphDatabase.driver(uri, auth=(user, password), **driver_kwargs)
         self._dim = int(embedding_dim)
 
     # -- lifecycle -----------------------------------------------------

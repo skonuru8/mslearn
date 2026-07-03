@@ -142,6 +142,40 @@ def test_upload_html_file(client):
     assert Path(body["stored_path"]).exists()
 
 
+def test_failures_grouped_and_retry_resets_and_reenqueues(client, tiny_pdf):
+    c, db, fake_task = client
+    r = c.post("/api/corpus/sources", json={"ref": str(tiny_pdf), "role": "spine"})
+    source_id = r.json()["source_id"]
+    chunk_ids = list(fake_task.delayed)
+    assert len(chunk_ids) >= 2
+    db.mark_chunk(chunk_ids[0], "failed", error="boom: bad json")
+    db.mark_chunk(chunk_ids[1], "failed", error="boom: bad json")
+
+    r = c.get(f"/api/corpus/sources/{source_id}/failures")
+    assert r.status_code == 200
+    groups = r.json()
+    assert groups == [{"error": "boom: bad json", "count": 2,
+                        "sample_chunk_ids": sorted(chunk_ids[:2])}]
+
+    db.set_source_status(source_id, "paused", error="failure rate 2/2")
+    fake_task.delayed.clear()
+    r = c.post(f"/api/corpus/sources/{source_id}/retry-failed")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["retried_chunks"] == 2
+    row = db.source_row(source_id)
+    assert row["status"] == "running"
+    assert row["error"] is None
+    assert row["failed_chunks"] == 0
+    assert sorted(fake_task.delayed) == sorted(chunk_ids[:2])
+
+
+def test_failures_and_retry_unknown_source_404(client):
+    c, _, _ = client
+    assert c.get("/api/corpus/sources/nope/failures").status_code == 404
+    assert c.post("/api/corpus/sources/nope/retry-failed").status_code == 404
+
+
 def test_upload_unsupported_suffix_rejected(client):
     c, _db, _task = client
     r = c.post(

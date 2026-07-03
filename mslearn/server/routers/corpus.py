@@ -127,6 +127,23 @@ def resume_source(source_id: str, ctx=Depends(get_ctx)):
     return {"source_id": source_id, "status": "running", "resumed_chunks": resumed}
 
 
+@router.get("/sources/{source_id}/failures")
+def source_failures(source_id: str, ctx=Depends(get_ctx)):
+    if ctx.db.source_row(source_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
+    return ctx.db.failure_groups(source_id)
+
+
+@router.post("/sources/{source_id}/retry-failed")
+def retry_failed_source(source_id: str, ctx=Depends(get_ctx)):
+    if ctx.db.source_row(source_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
+    reset_ids = ctx.db.reset_failed_chunks(source_id)
+    ctx.db.set_source_status(source_id, "running", clear_error=True)
+    resume_pending()  # re-enqueues the now-pending chunks (same machinery as /resume)
+    return {"source_id": source_id, "status": "running", "retried_chunks": len(reset_ids)}
+
+
 @router.get("/settings/domain-profile")
 def get_domain_profile_endpoint(ctx=Depends(get_ctx)):
     return {"profile": get_domain_profile(ctx.db)}

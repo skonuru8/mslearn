@@ -109,6 +109,51 @@ describe("CorpusView", () => {
     });
   });
 
+  it("expands failure reasons and retries failed chunks", async () => {
+    const row = {
+      source_id: "s1",
+      ref: "a.pdf",
+      role: "spine",
+      status: "running",
+      total_chunks: 4,
+      done_chunks: 2,
+      failed_chunks: 2,
+      error: null,
+      ts: 1,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [row] })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { error: "invalid JSON from ollama: ''", count: 2, sample_chunk_ids: ["s1:0", "s1:1"] },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ source_id: "s1", status: "running", retried_chunks: 2 }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ ...row, failed_chunks: 0 }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ profile: "technical" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    wrap(<CorpusView />);
+    await screen.findByText("a.pdf");
+    await userEvent.click(screen.getByRole("button", { name: /2 failed — why\?/ }));
+    await screen.findByText(/invalid JSON from ollama/);
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry failed" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/corpus/sources/s1/retry-failed",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
   it("shows error banner on 422 ingest", async () => {
     const fetchMock = vi
       .fn()

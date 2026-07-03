@@ -8,6 +8,7 @@ def test_defaults_registry_exact():
         "trust.quote_threshold": 90.0,
         "trust.embed_sim_threshold": 0.35,
         "extract.max_attempts": 2.0,
+        "extract.max_tokens": 8192.0,
         "monitor.failure_rate_threshold": 0.5,
         "monitor.min_chunks": 10.0,
         "synth.candidate_k": 8.0,

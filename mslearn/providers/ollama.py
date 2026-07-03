@@ -28,6 +28,12 @@ class OllamaProvider(ModelProvider):
         self._client = httpx.Client(base_url=base_url, timeout=timeout)
 
     def _body(self, model: str, request: ModelRequest, stream: bool) -> dict:
+        # Do NOT send think: false here. On ollama 0.31.x it disables the model's
+        # thinking pass but also stops the `format` JSON-schema constraint from
+        # being enforced (prose comes back instead of JSON) — reproduced by hand.
+        # The real fix for thinking models burning their token budget is a large
+        # enough `num_predict` (see extract.max_tokens) plus done_reason detection
+        # below, not toggling thinking off.
         body = {
             "model": model,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
@@ -62,6 +68,11 @@ class OllamaProvider(ModelProvider):
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError as exc:
+                if data.get("done_reason") == "length":
+                    raise ProviderBadOutputError(
+                        f"output truncated at num_predict={request.max_tokens}; model spent"
+                        " budget on thinking — raise max_tokens"
+                    ) from exc
                 raise ProviderBadOutputError(f"invalid JSON from ollama: {text[:200]!r}") from exc
         return ModelResponse(
             text=text, parsed=parsed,

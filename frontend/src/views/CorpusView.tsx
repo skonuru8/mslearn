@@ -1,9 +1,11 @@
 import type { FormEvent } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, uploadSource } from "../api/client";
 import type {
   DomainProfileResponse,
+  FailureGroup,
   IngestResponse,
+  RetryFailedResponse,
   SourceRow,
   SynthesizeResponse,
 } from "../api/types";
@@ -20,6 +22,8 @@ export function CorpusView() {
   const [local, setLocal] = useState(true);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [expandedSource, setExpandedSource] = useState<string | null>(null);
+  const [failures, setFailures] = useState<Record<string, FailureGroup[]>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,6 +112,37 @@ export function CorpusView() {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid domain profile");
+    }
+  }
+
+  async function toggleFailures(sourceId: string) {
+    if (expandedSource === sourceId) {
+      setExpandedSource(null);
+      return;
+    }
+    try {
+      const groups = await api<FailureGroup[]>(
+        `/api/corpus/sources/${encodeURIComponent(sourceId)}/failures`,
+      );
+      setFailures((prev) => ({ ...prev, [sourceId]: groups }));
+      setExpandedSource(sourceId);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load failure reasons");
+    }
+  }
+
+  async function onRetryFailed(sourceId: string) {
+    try {
+      await api<RetryFailedResponse>(
+        `/api/corpus/sources/${encodeURIComponent(sourceId)}/retry-failed`,
+        { method: "POST" },
+      );
+      setExpandedSource(null);
+      await load();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
     }
   }
 
@@ -203,26 +238,58 @@ export function CorpusView() {
         </thead>
         <tbody>
           {sources.map((row) => (
-            <tr key={row.source_id}>
-              <td>{row.ref}</td>
-              <td>{row.role}</td>
-              <td>{row.status}</td>
-              <td>
-                {row.done_chunks + row.failed_chunks}/{row.total_chunks}
-                {row.failed_chunks > 0 ? ` (${row.failed_chunks} failed)` : ""}
-              </td>
-              <td>
-                {row.status === "paused" ? (
-                  <button type="button" onClick={() => void setStatus(row.source_id, "resume")}>
-                    Resume
-                  </button>
-                ) : (
-                  <button type="button" onClick={() => void setStatus(row.source_id, "pause")}>
-                    Pause
-                  </button>
-                )}
-              </td>
-            </tr>
+            <Fragment key={row.source_id}>
+              <tr>
+                <td>{row.ref}</td>
+                <td>{row.role}</td>
+                <td>
+                  {row.status}
+                  {row.error ? <div className="hint">{row.error}</div> : null}
+                </td>
+                <td>
+                  {row.done_chunks + row.failed_chunks}/{row.total_chunks}
+                  {row.failed_chunks > 0 ? (
+                    <>
+                      {" "}
+                      <button type="button" onClick={() => void toggleFailures(row.source_id)}>
+                        {row.failed_chunks} failed — why?
+                      </button>
+                    </>
+                  ) : (
+                    ""
+                  )}
+                </td>
+                <td>
+                  {row.status === "paused" ? (
+                    <button type="button" onClick={() => void setStatus(row.source_id, "resume")}>
+                      Resume
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => void setStatus(row.source_id, "pause")}>
+                      Pause
+                    </button>
+                  )}
+                  {row.failed_chunks > 0 ? (
+                    <button type="button" onClick={() => void onRetryFailed(row.source_id)}>
+                      Retry failed
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+              {expandedSource === row.source_id ? (
+                <tr key={`${row.source_id}-failures`}>
+                  <td colSpan={5}>
+                    <ul>
+                      {(failures[row.source_id] ?? []).map((group) => (
+                        <li key={group.error}>
+                          {group.count}× {group.error} (e.g. {group.sample_chunk_ids.join(", ")})
+                        </li>
+                      ))}
+                    </ul>
+                  </td>
+                </tr>
+              ) : null}
+            </Fragment>
           ))}
         </tbody>
       </table>

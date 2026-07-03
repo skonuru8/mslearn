@@ -89,3 +89,20 @@ def test_parse_error_exhausted_escalates_with_rejects(tmp_path):
     assert state["accepted"] == []
     assert len(state["rejected"]) >= 1
     assert state["error"] is None
+
+
+def test_extraction_request_uses_max_tokens_tunable(tmp_path):
+    class RecordingRouter(ScriptedRouter):
+        def __init__(self, outputs):
+            super().__init__(outputs)
+            self.requests = []
+
+        def complete(self, role, request):
+            self.requests.append(request)
+            return super().complete(role, request)
+
+    router = RecordingRouter([GOOD])
+    d = db(tmp_path)
+    d.set_tunable("extract.max_tokens", 4096.0, "test")
+    run_extraction(router, d, "c1", CHUNK)
+    assert router.requests[0].max_tokens == 4096

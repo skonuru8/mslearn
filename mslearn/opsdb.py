@@ -88,6 +88,7 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "trust.quote_threshold": 90.0,
     "trust.embed_sim_threshold": 0.35,
     "extract.max_attempts": 2.0,
+    "extract.max_tokens": 8192.0,
     "monitor.failure_rate_threshold": 0.5,
     "monitor.min_chunks": 10.0,
     "synth.candidate_k": 8.0,
@@ -187,13 +188,19 @@ class OpsDB:
                 (source_id, ref, role, total_chunks, time.time()),
             )
 
-    def set_source_status(self, source_id, status, error=None) -> None:
+    def set_source_status(self, source_id, status, error=None, clear_error=False) -> None:
         with self._lock, self.conn:
-            self.conn.execute(
-                "UPDATE ingest_sources SET status = ?, error = COALESCE(?, error)"
-                " WHERE source_id = ?",
-                (status, error, source_id),
-            )
+            if clear_error:
+                self.conn.execute(
+                    "UPDATE ingest_sources SET status = ?, error = ? WHERE source_id = ?",
+                    (status, error, source_id),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE ingest_sources SET status = ?, error = COALESCE(?, error)"
+                    " WHERE source_id = ?",
+                    (status, error, source_id),
+                )
 
     def source_row(self, source_id) -> dict | None:
         with self._lock:
@@ -241,18 +248,78 @@ class OpsDB:
         return [r["chunk_id"] for r in rows]
 
     def try_complete_source(self, source_id: str) -> bool:
-        """Atomically flip running->done when all chunks are accounted for.
+        """Atomically flip running -> done|failed when all chunks are terminal.
 
-        Returns True exactly once per source; safe under concurrent workers.
+        A source whose chunks ALL failed is honestly reported as `failed`
+        (never `done`) so the UI doesn't lie about a source with zero
+        successful extractions. Returns True exactly once per source, and
+        only when the source completed as `done` — synthesizing after a
+        fully-failed source is pointless; safe under concurrent workers via
+        a single atomic UPDATE.
         """
         with self._lock, self.conn:
             cursor = self.conn.execute(
-                "UPDATE ingest_sources SET status = 'done'"
+                "UPDATE ingest_sources SET"
+                " status = CASE WHEN total_chunks > 0 AND failed_chunks = total_chunks"
+                "   THEN 'failed' ELSE 'done' END,"
+                " error = CASE WHEN total_chunks > 0 AND failed_chunks = total_chunks"
+                "   THEN 'all ' || total_chunks || ' chunks failed' ELSE error END"
                 " WHERE source_id = ? AND status = 'running'"
                 " AND done_chunks + failed_chunks >= total_chunks",
                 (source_id,),
             )
-            return cursor.rowcount == 1
+            if cursor.rowcount != 1:
+                return False
+            row = self.conn.execute(
+                "SELECT status FROM ingest_sources WHERE source_id = ?", (source_id,)
+            ).fetchone()
+            return row["status"] == "done"
+
+    def failure_groups(self, source_id: str) -> list[dict]:
+        """Group failed chunk_jobs by error message for a plain-language failures view."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT chunk_id, error FROM chunk_jobs"
+                " WHERE source_id = ? AND status = 'failed' ORDER BY chunk_id",
+                (source_id,),
+            ).fetchall()
+        groups: dict[str, list[str]] = {}
+        for row in rows:
+            groups.setdefault(row["error"] or "unknown error", []).append(row["chunk_id"])
+        return [
+            {"error": error, "count": len(ids), "sample_chunk_ids": ids[:3]}
+            for error, ids in sorted(groups.items(), key=lambda kv: -len(kv[1]))
+        ]
+
+    def reset_failed_chunks(self, source_id: str) -> list[str]:
+        """Reset failed/skipped_paused chunk_jobs to pending so they can be retried.
+
+        Decrements failed_chunks accordingly (skipped_paused was never counted).
+        Returns the chunk ids that were reset.
+        """
+        with self._lock, self.conn:
+            rows = self.conn.execute(
+                "SELECT chunk_id, status FROM chunk_jobs"
+                " WHERE source_id = ? AND status IN ('failed', 'skipped_paused')",
+                (source_id,),
+            ).fetchall()
+            ids = [row["chunk_id"] for row in rows]
+            if not ids:
+                return []
+            placeholders = ",".join("?" for _ in ids)
+            self.conn.execute(
+                f"UPDATE chunk_jobs SET status = 'pending', error = NULL, attempts = 0"
+                f" WHERE chunk_id IN ({placeholders})",
+                ids,
+            )
+            failed_count = sum(1 for row in rows if row["status"] == "failed")
+            if failed_count:
+                self.conn.execute(
+                    "UPDATE ingest_sources SET failed_chunks = failed_chunks - ?"
+                    " WHERE source_id = ?",
+                    (failed_count, source_id),
+                )
+            return ids
 
     def failure_stats(self, source_id) -> dict:
         with self._lock:

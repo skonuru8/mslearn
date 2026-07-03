@@ -34,6 +34,7 @@ class ExtractionState(TypedDict):
 
 def build_extraction_graph(router, db: OpsDB):
     max_attempts = int(db.get_tunable("extract.max_attempts"))
+    max_tokens = int(db.get_tunable("extract.max_tokens"))
     quote_threshold = db.get_tunable("trust.quote_threshold")
     embed_threshold = db.get_tunable("trust.embed_sim_threshold")
     base_prompt = get_prompt(db, "extraction")
@@ -47,6 +48,7 @@ def build_extraction_graph(router, db: OpsDB):
         request = ModelRequest(
             messages=[ModelMessage(role="user", content=prompt)],
             json_schema=EXTRACTION_SCHEMA,
+            max_tokens=max_tokens,
         )
         try:
             response = router.complete(role, request)

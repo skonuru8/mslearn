@@ -58,6 +58,18 @@ export interface SynthesizeResponse {
   enqueued: boolean;
 }
 
+export interface FailureGroup {
+  error: string;
+  count: number;
+  sample_chunk_ids: string[];
+}
+
+export interface RetryFailedResponse {
+  source_id: string;
+  status: string;
+  retried_chunks: number;
+}
+
 export interface ConceptMeta {
   concept_id: string;
   name: string;

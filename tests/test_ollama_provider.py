@@ -111,3 +111,21 @@ def test_malformed_embed_envelope_raises_bad_output():
     respx.post(f"{BASE}/api/embed").respond(json={"nope": []})
     with pytest.raises(ProviderBadOutputError):
         OllamaProvider(BASE).embed("m", ["x"])
+
+
+@respx.mock
+def test_thinking_truncation_raises_actionable_bad_output():
+    respx.post(f"{BASE}/api/chat").respond(json={
+        "message": {"content": ""}, "done_reason": "length",
+    })
+    with pytest.raises(ProviderBadOutputError, match="truncated"):
+        OllamaProvider(BASE).complete("m", req({"type": "object"}))
+
+
+@respx.mock
+def test_bad_json_without_length_done_reason_keeps_generic_message():
+    respx.post(f"{BASE}/api/chat").respond(json={
+        "message": {"content": "oops"}, "done_reason": "stop",
+    })
+    with pytest.raises(ProviderBadOutputError, match="invalid JSON"):
+        OllamaProvider(BASE).complete("m", req({"type": "object"}))
