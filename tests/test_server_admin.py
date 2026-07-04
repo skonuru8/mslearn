@@ -183,6 +183,7 @@ def test_status_consolidates_health_spend_and_synthesis(client, monkeypatch):
     monkeypatch.setattr(admin_module, "worker_online", lambda: False)
     monkeypatch.setattr(admin_module, "_redis_online", lambda ctx: True)
     monkeypatch.setattr(admin_module, "_neo4j_online", lambda ctx: True)
+    monkeypatch.setattr(admin_module, "_dead_letter_count", lambda ctx: 0)
     c, db = client
     db.log_model_call(role="extraction", provider="ollama", model="m1", cost_usd=0.5, outcome="ok")
 
@@ -194,3 +195,41 @@ def test_status_consolidates_health_spend_and_synthesis(client, monkeypatch):
     assert body["neo4j"] is True
     assert body["spend"] == {"total_calls": 1, "total_cost_usd": pytest.approx(0.5)}
     assert body["synthesis"] == {"last_run": None, "last_error": None}
+    assert "dead_letter_count" not in body  # nothing stuck -> key omitted
+
+
+def test_status_surfaces_dead_letter_count_when_jobs_are_stuck(client, monkeypatch):
+    import mslearn.server.routers.admin as admin_module
+
+    monkeypatch.setattr(admin_module, "worker_online", lambda: True)
+    monkeypatch.setattr(admin_module, "_redis_online", lambda ctx: True)
+    monkeypatch.setattr(admin_module, "_neo4j_online", lambda ctx: True)
+    monkeypatch.setattr(admin_module, "_dead_letter_count", lambda ctx: 3)
+    c, _db = client
+
+    r = c.get("/api/status")
+    assert r.status_code == 200
+    assert r.json()["dead_letter_count"] == 3
+
+
+def test_status_omits_dead_letter_count_when_probe_fails(client, monkeypatch):
+    import mslearn.server.routers.admin as admin_module
+
+    monkeypatch.setattr(admin_module, "worker_online", lambda: True)
+    monkeypatch.setattr(admin_module, "_redis_online", lambda ctx: False)
+    monkeypatch.setattr(admin_module, "_neo4j_online", lambda ctx: True)
+    monkeypatch.setattr(admin_module, "_dead_letter_count", lambda ctx: None)
+    c, _db = client
+
+    r = c.get("/api/status")
+    assert r.status_code == 200
+    assert "dead_letter_count" not in r.json()
+
+
+def test_dead_letter_probe_swallows_broker_errors(client):
+    from mslearn.server.routers.admin import _dead_letter_count
+
+    class Broken:
+        settings = type("S", (), {"redis_url": "redis://localhost:1/0"})()  # nothing listens
+
+    assert _dead_letter_count(Broken()) is None

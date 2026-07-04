@@ -32,7 +32,7 @@ def status(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
     timers so an idle tab makes one small request instead of two."""
     raw = ctx.db.get_project_setting(project_id, "synthesis:last_run")
     raw_error = ctx.db.get_project_setting(project_id, "synthesis:last_error")
-    return {
+    payload = {
         "worker": worker_online(),
         "redis": _redis_online(ctx),
         "neo4j": _neo4j_online(ctx),
@@ -42,6 +42,37 @@ def status(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
             "last_error": json.loads(raw_error) if raw_error else None,
         },
     }
+    dead = _dead_letter_count(ctx)
+    if dead:
+        # Only present when something is actually stuck: messages in the
+        # default "celery" queue mean a task was published without a route
+        # to a consumed queue (ingest/judge), so nothing will ever run it.
+        payload["dead_letter_count"] = dead
+    return payload
+
+
+def _dead_letter_count(ctx) -> int | None:
+    """Best-effort length of the default 'celery' broker queue.
+
+    Every mslearn task is routed to ingest or judge (guarded by
+    test_all_tasks_routed_to_consumed_queues), so anything sitting in
+    'celery' is a dead-lettered job no worker will ever consume — usually
+    messages published by pre-routing-fix code. Returns None (key omitted
+    from /api/status) when the broker can't be reached; this probe must
+    never break the status poll.
+    """
+    try:
+        import redis
+
+        url = getattr(getattr(ctx, "settings", None), "redis_url", None)
+        if not url:
+            from mslearn.settings import get_settings
+
+            url = get_settings().redis_url
+        client = redis.Redis.from_url(url, socket_connect_timeout=1, socket_timeout=1)
+        return int(client.llen("celery"))
+    except Exception:
+        return None
 
 
 def _redis_online(ctx) -> bool:

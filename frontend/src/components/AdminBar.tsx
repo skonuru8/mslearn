@@ -105,6 +105,16 @@ export function AdminBar() {
             ? "Background worker running"
             : "Worker offline — sources won't process, synthesis won't run"}
         </span>
+        {status?.dead_letter_count ? (
+          <span
+            className="worker-chip offline"
+            title="Some queued jobs came from an older version of the app and no worker will ever pick them up. Restart the app with the latest code; if this doesn't clear, contact support."
+          >
+            {status.dead_letter_count} background{" "}
+            {status.dead_letter_count === 1 ? "job is" : "jobs are"} stuck — restart the app with
+            the latest code
+          </span>
+        ) : null}
         <label>
           Profile
           <select

@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AdminBar } from "./AdminBar";
 
-function statusResponse(overrides: Partial<{ worker: boolean }> = {}) {
+function statusResponse(
+  overrides: Partial<{ worker: boolean; dead_letter_count: number }> = {},
+) {
   return {
     ok: true,
     json: async () => ({
@@ -12,6 +14,9 @@ function statusResponse(overrides: Partial<{ worker: boolean }> = {}) {
       neo4j: true,
       spend: { total_cost_usd: 0, total_calls: 0 },
       synthesis: { last_run: null, last_error: null },
+      ...(overrides.dead_letter_count !== undefined
+        ? { dead_letter_count: overrides.dead_letter_count }
+        : {}),
     }),
   };
 }
@@ -57,6 +62,35 @@ describe("AdminBar", () => {
 
     render(<AdminBar />);
     await screen.findByText(/Worker offline/);
+  });
+
+  it("warns about stuck background jobs when the status poll reports dead letters", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ active: "openrouter", available: ["openrouter"] }),
+      })
+      .mockResolvedValueOnce(statusResponse({ dead_letter_count: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminBar />);
+    await screen.findByText(/2 background jobs are stuck/);
+  });
+
+  it("shows no stuck-jobs warning when the status has no dead letters", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ active: "openrouter", available: ["openrouter"] }),
+      })
+      .mockResolvedValueOnce(statusResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminBar />);
+    await screen.findByText("Background worker running");
+    expect(screen.queryByText(/stuck/)).toBeNull();
   });
 
   it("does not poll /api/status while the tab is hidden, but resumes on visibility", async () => {

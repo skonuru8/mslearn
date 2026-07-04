@@ -108,6 +108,8 @@ export interface StatusResponse {
   neo4j: boolean;
   spend: SpendTotals;
   synthesis: SynthesisStatusResponse;
+  /** Only present when background jobs are stuck in an unconsumed queue. */
+  dead_letter_count?: number;
 }
 
 export interface ConceptMeta {
