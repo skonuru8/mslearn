@@ -195,7 +195,14 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
     source_id = chunk_id.rsplit(":", 1)[0]
 
     source = ctx.db.source_row(source_id, project_id=project_id)
-    if source is not None and source["status"] == "paused":
+    if source is None:
+        # Source deleted after this chunk was enqueued. Say so once and stop
+        # before any model call — previously the task silently ran a full
+        # extraction, then no-oped inside mark_chunk's missing-row early
+        # return, burning tokens for a source that no longer exists.
+        logger.info("chunk %s skipped: source deleted", chunk_id)
+        return
+    if source["status"] == "paused":
         ctx.db.mark_chunk(chunk_id, "skipped_paused")
         return
 

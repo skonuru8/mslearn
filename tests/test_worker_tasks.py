@@ -69,6 +69,29 @@ def test_paused_source_skips(ctx):
     assert context.db.pending_chunks("s1") == []  # marked skipped_paused, not pending
 
 
+def test_deleted_source_skips_extraction_with_one_info_line(ctx, caplog):
+    import logging
+
+    class NoCallRouter:
+        def complete(self, role, request):
+            raise AssertionError("no model calls for a deleted source")
+
+        def embed(self, texts):
+            raise AssertionError("no embed calls for a deleted source")
+
+    context = ctx(NoCallRouter())
+    context.db.delete_source("s1")
+    with caplog.at_level(logging.INFO, logger="mslearn"):
+        worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
+    assert context.graph.claims == {}
+    skip_lines = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.INFO and "source deleted" in r.getMessage()
+    ]
+    assert skip_lines == ["chunk s1:0 skipped: source deleted"]
+
+
 def test_missing_chunk_marks_failed(ctx):
     context = ctx(ScriptedRouter([GOOD]))
     context.db.register_chunk_jobs("s1", ["s1:9"])
