@@ -18,6 +18,32 @@ from mslearn.worker.context import get_context
 logger = logging.getLogger(__name__)
 
 
+def _source_prep_stale(db, source_id: str, project_id: str, entry_ts: float) -> bool:
+    """True when a chunk_source_task's row is no longer the one it started on.
+
+    Re-read the source row and compare against what the task saw at entry:
+    row gone = deleted mid-flight; status flipped away from "chunking" =
+    another delivery already processed it (or it was paused/failed); `ts`
+    changed = deleted and re-added, i.e. a fresh incarnation whose own task
+    owns the work. One INFO line per abort so the event is traceable
+    without spamming the worker log.
+    """
+    row = db.source_row(source_id, project_id=project_id)
+    if row is None:
+        logger.info("source %s preparation aborted: deleted mid-task", source_id)
+        return True
+    if row["status"] != "chunking":
+        logger.info(
+            "source %s preparation aborted: status is %r, not 'chunking'",
+            source_id, row["status"],
+        )
+        return True
+    if row["ts"] != entry_ts:
+        logger.info("source %s preparation aborted: re-added mid-task", source_id)
+        return True
+    return False
+
+
 @app.task(
     bind=True,
     autoretry_for=(ProviderTransientError,),
@@ -48,15 +74,30 @@ def chunk_source_task(
     the paused-skip guard in extract_chunk_task. register_chunk_jobs
     (INSERT OR IGNORE) and upsert_chunks (MERGE) make a retried task safe
     even if it re-runs after partially registering chunks.
+
+    The entry check alone is TOCTOU-racy: load/chunk/embed can run for
+    minutes, during which the user may delete the source (row gone) or
+    delete-and-re-add it (fresh row, same source_id PK, new `ts`). The row
+    is therefore re-checked right before the first write — see
+    `_source_row_changed` — so a stale in-flight task can't clobber the
+    fresh incarnation or resurrect graph nodes for a deleted source. The
+    re-added source's own chunk_source_task (queued by its POST) does the
+    real work.
     """
     ctx = get_context()
     row = ctx.db.source_row(source_id, project_id=project_id)
     if row is None or row["status"] != "chunking":
         return
+    # Row identity at task start: a re-added source reuses the same PK but
+    # gets a fresh `ts`, so a changed ts at re-check means "different
+    # incarnation" even if the status looks right.
+    entry_ts = row["ts"]
 
     try:
         doc = load_source(ref, source_type=source_type, role=role)
     except Exception as exc:
+        if _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
+            return
         ctx.db.set_source_status(source_id, "failed", error=str(exc)[:500])
         logger.warning("source %s failed to load %s: %s", source_id, ref, str(exc)[:120])
         return
@@ -66,14 +107,24 @@ def chunk_source_task(
         embeddings = ctx.router.embed([c.text for c in chunks]) if chunks else []
     except ProviderTransientError as exc:
         if self.request.retries >= self.max_retries:
+            if _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
+                return
             ctx.db.set_source_status(
                 source_id, "failed", error=f"embedding retries exhausted: {exc}"[:500]
             )
             logger.warning("source %s failed: embedding retries exhausted", source_id)
         raise
     except Exception as exc:
+        if _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
+            return
         ctx.db.set_source_status(source_id, "failed", error=str(exc)[:500])
         logger.warning("source %s failed to embed chunks: %s", source_id, str(exc)[:120])
+        return
+
+    # TOCTOU re-check: the slow work above (adapter load can take minutes)
+    # may have raced a delete or delete+re-add. Abort before the first
+    # graph/DB write if this task's row incarnation is no longer current.
+    if _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
         return
 
     ctx.graph.upsert_source(doc, project_id=project_id)

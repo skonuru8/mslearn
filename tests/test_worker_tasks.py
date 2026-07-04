@@ -278,6 +278,77 @@ def test_chunk_source_task_transient_embed_exhausted_marks_failed(tmp_path, tiny
     assert graph.sources == {}  # never reached the graph upsert step
 
 
+class EmbedWithSideEffect:
+    """Router whose embed() runs a hook first — simulates a delete/re-add
+    landing while the slow load/chunk/embed phase of chunk_source_task runs."""
+
+    def __init__(self, hook):
+        self.hook = hook
+
+    def embed(self, texts):
+        self.hook()
+        return [[1.0, 0.0] for _ in texts]
+
+    def complete(self, role, request):
+        raise AssertionError("chunk_source_task must not call complete()")
+
+
+def test_chunk_source_task_aborts_when_source_deleted_mid_task(tmp_path, tiny_pdf, caplog):
+    import logging
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    source_id = make_source_id(str(tiny_pdf))
+    db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=0)
+    db.set_source_status(source_id, "chunking")
+    router = EmbedWithSideEffect(lambda: db.delete_source(source_id))
+    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+
+    with caplog.at_level(logging.INFO, logger="mslearn"):
+        worker_tasks.chunk_source_task.delay(
+            "default", source_id, str(tiny_pdf), "spine", "pdf", False
+        ).get()
+
+    assert db.source_row(source_id) is None  # not resurrected
+    assert graph.sources == {} and graph.chunks == {}  # no graph writes
+    assert db.pending_chunks(source_id) == []  # no chunk jobs registered
+    infos = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any("deleted mid-task" in m and source_id in m for m in infos)
+
+
+def test_chunk_source_task_aborts_when_source_readded_mid_task(tmp_path, tiny_pdf, caplog):
+    import logging
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    source_id = make_source_id(str(tiny_pdf))
+    db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=0)
+    db.set_source_status(source_id, "chunking")
+
+    def delete_and_readd():
+        # Fresh incarnation: same PK, new ts, back in "chunking" — exactly
+        # what a delete followed by re-adding the same file produces.
+        db.delete_source(source_id)
+        db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=0)
+        db.set_source_status(source_id, "chunking")
+
+    router = EmbedWithSideEffect(delete_and_readd)
+    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+
+    with caplog.at_level(logging.INFO, logger="mslearn"):
+        worker_tasks.chunk_source_task.delay(
+            "default", source_id, str(tiny_pdf), "spine", "pdf", False
+        ).get()
+
+    row = db.source_row(source_id)
+    assert row["status"] == "chunking"  # fresh row untouched, still owned by its own task
+    assert row["total_chunks"] == 0
+    assert graph.sources == {} and graph.chunks == {}
+    assert db.pending_chunks(source_id) == []
+    infos = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any("re-added mid-task" in m and source_id in m for m in infos)
+
+
 def test_synthesis_failure_records_last_error(ctx, monkeypatch):
     context = ctx(ScriptedRouter([]))
 
