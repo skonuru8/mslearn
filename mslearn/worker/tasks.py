@@ -283,7 +283,17 @@ def synthesize_task(project_id: str = "default"):
     logger.info("synthesis started project=%s", project_id)
     try:
         dirty = cluster_new_claims(ctx, project_id)
+        # Heartbeat between phases: a long-but-alive run (the 107-chunk video
+        # incident ran 78+ minutes) must keep refreshing running_since so the
+        # status endpoint's abandoned-build self-heal never trips on a run
+        # that's still making progress.
+        ctx.db.set_project_setting(
+            project_id, "synthesis:running_since", str(int(time.time()))
+        )
         processed = process_dirty_concepts(ctx, project_id)
+        ctx.db.set_project_setting(
+            project_id, "synthesis:running_since", str(int(time.time()))
+        )
         ordered = build_curriculum(ctx, project_id)
     except Exception as exc:
         logger.exception("synthesis failed for project %s", project_id)

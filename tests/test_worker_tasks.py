@@ -409,6 +409,34 @@ def test_synthesis_sets_and_clears_running_since(ctx, monkeypatch):
     assert not context.db.get_project_setting("default", "synthesis:running_since")
 
 
+def test_synthesis_heartbeat_refreshes_between_phases(ctx, monkeypatch):
+    # The 107-chunk-video incident ran 78+ minutes on one project; without a
+    # heartbeat, the status endpoint's abandoned-build self-heal (2x the
+    # running TTL) would eventually treat a still-alive run as wedged.
+    context = ctx(ScriptedRouter([]))
+    ticks = iter([1000, 2000, 3000, 4000])
+    monkeypatch.setattr(worker_tasks.time, "time", lambda: next(ticks))
+    seen = []
+
+    def cluster(c, p):
+        seen.append(context.db.get_project_setting("default", "synthesis:running_since"))
+        return []
+
+    def process(c, p):
+        seen.append(context.db.get_project_setting("default", "synthesis:running_since"))
+        return 0
+
+    def curriculum(c, p):
+        seen.append(context.db.get_project_setting("default", "synthesis:running_since"))
+        return []
+
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", cluster)
+    monkeypatch.setattr(worker_tasks, "process_dirty_concepts", process)
+    monkeypatch.setattr(worker_tasks, "build_curriculum", curriculum)
+    worker_tasks.synthesize_task.delay("default").get()
+    assert seen == ["1000", "2000", "3000"]  # strictly increasing heartbeat, one per phase boundary
+
+
 def test_synthesis_failure_clears_running_since(ctx, monkeypatch):
     context = ctx(ScriptedRouter([]))
     monkeypatch.setattr(

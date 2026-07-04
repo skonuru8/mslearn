@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from mslearn.opsdb import SYNTHESIS_RUNNING_TTL_S
 from mslearn.pipeline.orchestrator import IngestError, ingest_source, resume_pending
 from mslearn.prompts import get_domain_profile
 from mslearn.server.deps import get_ctx, get_project_id
@@ -230,8 +231,31 @@ def synthesis_status(ctx=Depends(get_ctx), project_id: str = Depends(get_project
     raw = ctx.db.get_project_setting(project_id, "synthesis:last_run")
     raw_error = ctx.db.get_project_setting(project_id, "synthesis:last_error")
     running_since = ctx.db.get_project_setting(project_id, "synthesis:running_since")
+    last_run = json.loads(raw) if raw is not None else None
+    last_error = json.loads(raw_error) if raw_error else None
+    running_ts = int(running_since) if running_since else None
+
+    # Self-heal an abandoned build: a worker that died or was force-restarted
+    # mid-run leaves `running_since` set forever, so the UI would show
+    # "Building your course..." indefinitely with no way to tell live from
+    # wedged. A marker older than 2x the dedup TTL can't belong to a run that
+    # is still alive (synthesize_task heartbeats it between phases), so treat
+    # it as abandoned: clear it and, unless a later last_run already
+    # supersedes it (a completed run whose own clear just didn't land), tell
+    # the user the build was interrupted. Never overwrite the DB's last_error
+    # — this synthetic value is response-only.
+    if running_ts is not None and time.time() - running_ts > 2 * SYNTHESIS_RUNNING_TTL_S:
+        ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
+        fresher_run = last_run is not None and last_run.get("ts", 0) >= running_ts
+        if not fresher_run:
+            last_error = {
+                "ts": int(time.time()),
+                "error": "course build was interrupted — press Build to restart",
+            }
+        running_ts = None
+
     return {
-        "last_run": json.loads(raw) if raw is not None else None,
-        "last_error": json.loads(raw_error) if raw_error else None,
-        "running_since": int(running_since) if running_since else None,
+        "last_run": last_run,
+        "last_error": last_error,
+        "running_since": running_ts,
     }

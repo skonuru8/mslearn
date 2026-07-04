@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -311,13 +312,59 @@ def test_synthesis_status_reflects_last_run_setting(client):
 
 def test_synthesis_status_reports_running_since(client):
     c, db, _task = client
-    db.set_project_setting("default", "synthesis:running_since", "1783000000")
+    ts = int(time.time()) - 60  # fresh — must not be self-healed away
+    db.set_project_setting("default", "synthesis:running_since", str(ts))
     r = c.get("/api/corpus/synthesis/status")
-    assert r.json()["running_since"] == 1783000000
+    assert r.json()["running_since"] == ts
 
     db.set_project_setting("default", "synthesis:running_since", "")
     r = c.get("/api/corpus/synthesis/status")
     assert r.json()["running_since"] is None
+
+
+def test_synthesis_status_passes_through_fresh_marker(client):
+    # A marker inside the TTL window must NOT be touched — this is a live run.
+    c, db, _task = client
+    fresh = int(time.time()) - 60
+    db.set_project_setting("default", "synthesis:running_since", str(fresh))
+    r = c.get("/api/corpus/synthesis/status")
+    body = r.json()
+    assert body["running_since"] == fresh
+    assert body["last_error"] is None
+    assert db.get_project_setting("default", "synthesis:running_since") == str(fresh)
+
+
+def test_synthesis_status_self_heals_abandoned_marker(client):
+    from mslearn.opsdb import SYNTHESIS_RUNNING_TTL_S
+
+    c, db, _task = client
+    stale = int(time.time()) - int(2.5 * SYNTHESIS_RUNNING_TTL_S)
+    db.set_project_setting("default", "synthesis:running_since", str(stale))
+    r = c.get("/api/corpus/synthesis/status")
+    body = r.json()
+    assert body["running_since"] is None
+    assert body["last_error"]["error"] == "course build was interrupted — press Build to restart"
+    # cleared in the DB too, not just the response
+    assert not db.get_project_setting("default", "synthesis:running_since")
+
+
+def test_synthesis_status_self_heal_skips_synthetic_error_when_run_completed_since(client):
+    from mslearn.opsdb import SYNTHESIS_RUNNING_TTL_S
+
+    c, db, _task = client
+    stale = int(time.time()) - int(2.5 * SYNTHESIS_RUNNING_TTL_S)
+    db.set_project_setting("default", "synthesis:running_since", str(stale))
+    # last_run's ts is fresher than the abandoned marker — a run actually
+    # completed after this one started, so it isn't a wedged build; the
+    # marker just failed to clear. Don't invent an interruption error.
+    db.set_project_setting(
+        "default", "synthesis:last_run",
+        json.dumps({"ts": stale + 10, "dirty_concepts": 0, "processed_concepts": 0, "curriculum_len": 0}),
+    )
+    r = c.get("/api/corpus/synthesis/status")
+    body = r.json()
+    assert body["running_since"] is None
+    assert body["last_error"] is None
 
 
 def test_synthesis_status_surfaces_last_error(client):
