@@ -26,7 +26,9 @@ def _json(resp: httpx.Response) -> dict:
 class OpenRouterProvider(ModelProvider):
     name = "openrouter"
 
-    def __init__(self, api_key: str, timeout: float = 300.0):
+    # Reasoning models on big synthesis prompts can legitimately take >5 min;
+    # a 300s read timeout was killing whole synthesis runs mid-flight.
+    def __init__(self, api_key: str, timeout: float = 600.0):
         key = (api_key or "").strip()
         if not key:
             raise ProviderError(

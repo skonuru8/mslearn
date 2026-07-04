@@ -291,6 +291,14 @@ def test_synthesis_failure_records_last_error(ctx, monkeypatch):
     assert raw and "synthesis exploded" in raw
 
 
+def test_synthesize_task_retries_transient_provider_errors():
+    """A single read timeout killed whole synthesis runs — the task must
+    autoretry ProviderTransientError like extract_chunk_task does."""
+    from mslearn.providers.base import ProviderTransientError as PTE
+
+    assert PTE in worker_tasks.synthesize_task.autoretry_for
+
+
 def test_synthesis_sets_and_clears_running_since(ctx, monkeypatch):
     context = ctx(ScriptedRouter([]))
     seen = {}

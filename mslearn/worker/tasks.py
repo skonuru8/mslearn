@@ -190,7 +190,11 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
     _finalize_chunk(ctx, project_id, source_id, chunk_id, "done", error)
 
 
-@app.task
+@app.task(
+    autoretry_for=(ProviderTransientError,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
 def synthesize_task(project_id: str = "default"):
     ctx = get_context()
     ctx.db.set_project_setting(
