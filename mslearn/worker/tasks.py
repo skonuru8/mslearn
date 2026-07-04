@@ -193,6 +193,10 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
 @app.task
 def synthesize_task(project_id: str = "default"):
     ctx = get_context()
+    ctx.db.set_project_setting(
+        project_id, "synthesis:running_since", str(int(time.time()))
+    )
+    logger.info("synthesis started project=%s", project_id)
     try:
         dirty = cluster_new_claims(ctx, project_id)
         processed = process_dirty_concepts(ctx, project_id)
@@ -204,6 +208,7 @@ def synthesize_task(project_id: str = "default"):
             "synthesis:last_error",
             json.dumps({"ts": int(time.time()), "error": str(exc)[:500]}, sort_keys=True),
         )
+        ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
         raise
     payload = {
         "ts": int(time.time()),
@@ -215,6 +220,7 @@ def synthesize_task(project_id: str = "default"):
         project_id, "synthesis:last_run", json.dumps(payload, sort_keys=True)
     )
     ctx.db.set_project_setting(project_id, "synthesis:last_error", "")
+    ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
     logger.info(
         "synthesis done project=%s processed=%d curriculum=%d",
         project_id, processed, len(ordered),

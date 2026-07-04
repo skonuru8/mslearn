@@ -93,6 +93,7 @@ export interface SynthesisStatusResponse {
     curriculum_len: number;
   } | null;
   last_error?: { ts: number; error: string } | null;
+  running_since?: number | null;
 }
 
 export interface SpendTotals {

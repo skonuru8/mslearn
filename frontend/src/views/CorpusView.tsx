@@ -127,6 +127,18 @@ export function CorpusView() {
   }, [load, refreshSynthesisStatus, projectId]);
 
   useEffect(() => {
+    if (!synthesisStatus?.running_since) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshSynthesisStatus();
+      }
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [synthesisStatus?.running_since, refreshSynthesisStatus]);
+
+  useEffect(() => {
     if (!sources.some(isActiveSource)) {
       return;
     }
@@ -450,6 +462,13 @@ export function CorpusView() {
 
       {synthMsg ? (
         <div className={`synth-notice ${synthMsg.includes("offline") ? "warn" : ""}`}>{synthMsg}</div>
+      ) : null}
+      {synthesisStatus?.running_since ? (
+        <div className="synth-notice">
+          Building your course from what was read… started{" "}
+          {formatSynthesisAgo(synthesisStatus.running_since)}. Topics appear in My course when it
+          finishes.
+        </div>
       ) : null}
       {lastRun ? (
         <p className="hint">

@@ -1,30 +1,55 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { ConceptMeta } from "../api/types";
+import type { ConceptMeta, SynthesisStatusResponse } from "../api/types";
 import { useProject } from "../context/ProjectContext";
 import { ErrorBanner, Loading } from "../components/Status";
 
 export function CurriculumView() {
   const { projectId } = useProject();
   const [concepts, setConcepts] = useState<ConceptMeta[]>([]);
+  const [building, setBuilding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    const [rows, synth] = await Promise.all([
+      api<ConceptMeta[]>("/api/study/curriculum"),
+      api<SynthesisStatusResponse>("/api/corpus/synthesis/status").catch(() => null),
+    ]);
+    setConcepts(rows);
+    setBuilding(Boolean(synth?.running_since));
+    setError(null);
+  }, []);
 
   useEffect(() => {
     void (async () => {
       setLoading(true);
       try {
-        const rows = await api<ConceptMeta[]>("/api/study/curriculum");
-        setConcepts(rows);
-        setError(null);
+        await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load your course");
       } finally {
         setLoading(false);
       }
     })();
-  }, [projectId]);
+  }, [refresh, projectId]);
+
+  useEffect(() => {
+    if (!building) {
+      return;
+    }
+    // Course is being assembled right now — refresh so topics appear on
+    // their own instead of requiring a manual reload.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refresh().catch(() => {
+          /* keep polling */
+        });
+      }
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [building, refresh]);
 
   if (loading) {
     return <Loading />;
@@ -34,7 +59,16 @@ export function CurriculumView() {
     <section className="panel">
       <h1>My course</h1>
       <ErrorBanner message={error} />
-      {concepts.length === 0 ? (
+      {concepts.length === 0 && building ? (
+        <div className="onboarding-card">
+          <h2>Building your course…</h2>
+          <p>
+            Your materials are read — now the topics are being organized, named, and put in
+            learning order. This can take several minutes for a big source. This page refreshes
+            itself; no need to reload.
+          </p>
+        </div>
+      ) : concepts.length === 0 ? (
         <div className="onboarding-card">
           <h2>Your course will appear here</h2>
           <ol className="onboarding-steps">

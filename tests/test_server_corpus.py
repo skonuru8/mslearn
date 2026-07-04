@@ -276,7 +276,7 @@ def test_synthesis_status_reflects_last_run_setting(client):
     c, db, _task = client
     r = c.get("/api/corpus/synthesis/status")
     assert r.status_code == 200
-    assert r.json() == {"last_run": None, "last_error": None}
+    assert r.json() == {"last_run": None, "last_error": None, "running_since": None}
 
     db.set_project_setting(
         "default", "synthesis:last_run",
@@ -286,7 +286,19 @@ def test_synthesis_status_reflects_last_run_setting(client):
     assert r.json() == {
         "last_run": {"ts": 123, "dirty_concepts": 2, "processed_concepts": 2, "curriculum_len": 5},
         "last_error": None,
+        "running_since": None,
     }
+
+
+def test_synthesis_status_reports_running_since(client):
+    c, db, _task = client
+    db.set_project_setting("default", "synthesis:running_since", "1783000000")
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json()["running_since"] == 1783000000
+
+    db.set_project_setting("default", "synthesis:running_since", "")
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json()["running_since"] is None
 
 
 def test_synthesis_status_surfaces_last_error(client):

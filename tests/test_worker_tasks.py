@@ -291,6 +291,33 @@ def test_synthesis_failure_records_last_error(ctx, monkeypatch):
     assert raw and "synthesis exploded" in raw
 
 
+def test_synthesis_sets_and_clears_running_since(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+    seen = {}
+
+    def snapshot(c, p):
+        seen["during"] = context.db.get_project_setting("default", "synthesis:running_since")
+        return []
+
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", snapshot)
+    monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
+    monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    worker_tasks.synthesize_task.delay("default").get()
+    assert seen["during"]  # set while running
+    assert not context.db.get_project_setting("default", "synthesis:running_since")
+
+
+def test_synthesis_failure_clears_running_since(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+    monkeypatch.setattr(
+        worker_tasks, "cluster_new_claims",
+        lambda c, p: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError):
+        worker_tasks.synthesize_task.delay("default").get()
+    assert not context.db.get_project_setting("default", "synthesis:running_since")
+
+
 def test_synthesis_success_clears_last_error(ctx, monkeypatch):
     context = ctx(ScriptedRouter([]))
     context.db.set_project_setting("default", "synthesis:last_error", '{"error": "old"}')
