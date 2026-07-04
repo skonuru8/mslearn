@@ -63,6 +63,7 @@ export interface DomainProfileResponse {
 
 export interface SynthesizeResponse {
   enqueued: boolean;
+  already_running: boolean;
   worker_online: boolean;
 }
 

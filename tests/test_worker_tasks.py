@@ -336,6 +336,65 @@ def test_synthesis_success_clears_last_error(ctx, monkeypatch):
     assert not context.db.get_project_setting("default", "synthesis:last_error")
 
 
+def test_try_enqueue_synthesis_collapses_rapid_triggers(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+
+    class Trigger:
+        def __init__(self):
+            self.calls = 0
+
+        def delay(self, project_id="default"):
+            self.calls += 1
+
+    trigger = Trigger()
+    monkeypatch.setattr(worker_tasks, "synthesize_task", trigger)
+
+    assert worker_tasks.try_enqueue_synthesis(context.db, "default") is True
+    assert worker_tasks.try_enqueue_synthesis(context.db, "default") is False
+    assert worker_tasks.try_enqueue_synthesis(context.db, "default") is False
+    assert trigger.calls == 1
+
+
+def test_synthesis_queued_marker_expires_by_timestamp(tmp_path):
+    from mslearn.opsdb import SYNTHESIS_QUEUED_TTL_S
+
+    db = OpsDB(tmp_path / "ops.db")
+    t0 = 1_000_000.0
+    assert db.try_mark_synthesis_queued("default", now=t0) is True
+    assert db.try_mark_synthesis_queued("default", now=t0 + 60) is False
+    # a crashed worker can't wedge synthesis forever — a stale queued marker
+    # (older than the TTL) lets the next trigger re-enqueue
+    assert db.try_mark_synthesis_queued("default", now=t0 + SYNTHESIS_QUEUED_TTL_S + 1) is True
+
+
+def test_fresh_running_marker_blocks_enqueue_stale_one_does_not(tmp_path):
+    from mslearn.opsdb import SYNTHESIS_RUNNING_TTL_S
+
+    db = OpsDB(tmp_path / "ops.db")
+    t0 = 1_000_000.0
+    db.set_project_setting("default", "synthesis:running_since", str(int(t0)))
+    assert db.try_mark_synthesis_queued("default", now=t0 + 60) is False
+    assert db.try_mark_synthesis_queued("default", now=t0 + SYNTHESIS_RUNNING_TTL_S + 1) is True
+
+
+def test_synthesis_dedup_marker_is_per_project(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    assert db.try_mark_synthesis_queued("default") is True
+    assert db.try_mark_synthesis_queued("other-project") is True  # independent marker
+
+
+def test_synthesize_task_start_clears_queued_marker(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+    assert context.db.try_mark_synthesis_queued("default") is True
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
+    monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    worker_tasks.synthesize_task.delay("default").get()
+    assert context.db.get_project_setting("default", "synthesis:queued") is None
+    # marker cleared + running_since cleared -> a follow-up trigger may queue again
+    assert context.db.try_mark_synthesis_queued("default") is True
+
+
 def test_all_tasks_routed_to_consumed_queues():
     """An unrouted task lands in the default 'celery' queue, which no worker
     consumes (dev_up.sh / make worker consume ingest,judge only) — the task

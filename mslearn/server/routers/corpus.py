@@ -12,7 +12,7 @@ from mslearn.prompts import get_domain_profile
 from mslearn.server.deps import get_ctx, get_project_id
 from mslearn.worker.app import app as celery_app
 from mslearn.worker.app import worker_online
-from mslearn.worker.tasks import synthesize_task
+from mslearn.worker.tasks import try_enqueue_synthesis
 
 router = APIRouter(prefix="/api/corpus", tags=["corpus"])
 
@@ -172,8 +172,9 @@ def delete_source(source_id: str, ctx=Depends(get_ctx), project_id: str = Depend
     affected = ctx.graph.delete_source(source_id, project_id=project_id)
     ctx.db.delete_source(source_id, project_id=project_id)
     if affected:
-        # curriculum + surviving dirty concepts need a rebuild pass
-        synthesize_task.delay(project_id)
+        # curriculum + surviving dirty concepts need a rebuild pass; deduped
+        # so deleting several sources in a row queues one run, not one each
+        try_enqueue_synthesis(ctx.db, project_id)
     return {"source_id": source_id, "deleted": True, "affected_concepts": len(affected)}
 
 
@@ -216,8 +217,12 @@ def set_domain_profile(
 
 @router.post("/synthesize")
 def enqueue_synthesis(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
-    synthesize_task.delay(project_id)
-    return {"enqueued": True, "worker_online": worker_online()}
+    enqueued = try_enqueue_synthesis(ctx.db, project_id)
+    return {
+        "enqueued": enqueued,
+        "already_running": not enqueued,
+        "worker_online": worker_online(),
+    }
 
 
 @router.get("/synthesis/status")

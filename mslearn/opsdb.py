@@ -102,6 +102,14 @@ CREATE INDEX IF NOT EXISTS idx_chat_turns_session
 
 DEFAULT_PROJECT_ID = "default"
 
+# TTLs for the synthesis-enqueue dedup marker (try_mark_synthesis_queued):
+# a queued-but-not-yet-started trigger is considered stale after 15 minutes
+# (a worker should have picked it up long before then); a running marker is
+# considered stale after 30 minutes so a crashed worker that never cleared
+# `synthesis:running_since` can't wedge synthesis forever.
+SYNTHESIS_QUEUED_TTL_S = 15 * 60
+SYNTHESIS_RUNNING_TTL_S = 30 * 60
+
 
 def project_setting_key(project_id: str, key: str) -> str:
     return f"project:{project_id}:{key}"
@@ -251,6 +259,56 @@ class OpsDB:
 
     def delete_project_setting(self, project_id: str, key: str) -> None:
         self.delete_setting(project_setting_key(project_id, key))
+
+    def try_mark_synthesis_queued(self, project_id: str, *, now: float | None = None) -> bool:
+        """Atomically claim the right to enqueue a synthesis run for `project_id`.
+
+        Collapses N near-simultaneous triggers (Build button double-clicks,
+        delete_source's rebuild, try_complete_source's auto-fire, claim
+        flagging) into at most one queued follow-up: returns False when a
+        fresh queued marker (< `SYNTHESIS_QUEUED_TTL_S`) or a fresh running
+        marker (< `SYNTHESIS_RUNNING_TTL_S`, in case a worker crashed mid-run
+        without clearing it) already exists, True (and sets the queued
+        marker) otherwise. Single atomic transaction under the same lock
+        every other OpsDB write uses — safe under concurrent callers from
+        both the API process and worker processes sharing this sqlite file.
+        Redis stays broker-only; this marker lives here, not in the broker.
+        """
+        now = time.time() if now is None else now
+        running_key = project_setting_key(project_id, "synthesis:running_since")
+        queued_key = project_setting_key(project_id, "synthesis:queued")
+        with self._lock, self.conn:
+            running_row = self.conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (running_key,)
+            ).fetchone()
+            if running_row and running_row["value"]:
+                try:
+                    running_ts = float(running_row["value"])
+                except ValueError:
+                    running_ts = 0.0
+                if now - running_ts < SYNTHESIS_RUNNING_TTL_S:
+                    return False
+            queued_row = self.conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (queued_key,)
+            ).fetchone()
+            if queued_row and queued_row["value"]:
+                try:
+                    queued_ts = float(queued_row["value"])
+                except ValueError:
+                    queued_ts = 0.0
+                if now - queued_ts < SYNTHESIS_QUEUED_TTL_S:
+                    return False
+            self.conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (queued_key, str(now)),
+            )
+            return True
+
+    def clear_synthesis_queued(self, project_id: str) -> None:
+        """Called when a synthesis run actually starts (synthesize_task), so
+        the next trigger after this run finishes is free to queue again."""
+        self.delete_project_setting(project_id, "synthesis:queued")
 
     def create_project(self, project_id: str, name: str) -> None:
         with self._lock, self.conn:

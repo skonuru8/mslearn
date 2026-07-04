@@ -260,16 +260,35 @@ def test_upload_over_size_cap_rejected_413(client, monkeypatch):
 
 
 def test_synthesize_reports_worker_online_status(client, monkeypatch):
-    c, _db, _task = client
-    monkeypatch.setattr("mslearn.server.routers.corpus.synthesize_task", NoDelaySynthesisTask())
+    c, db, _task = client
+    synth = NoDelaySynthesisTask()
+    monkeypatch.setattr("mslearn.worker.tasks.synthesize_task", synth)
     monkeypatch.setattr("mslearn.server.routers.corpus.worker_online", lambda: True)
     r = c.post("/api/corpus/synthesize")
     assert r.status_code == 200
-    assert r.json() == {"enqueued": True, "worker_online": True}
+    assert r.json() == {"enqueued": True, "already_running": False, "worker_online": True}
+    assert synth.delayed == ["default"]
 
+    db.clear_synthesis_queued("default")
     monkeypatch.setattr("mslearn.server.routers.corpus.worker_online", lambda: False)
     r = c.post("/api/corpus/synthesize")
-    assert r.json() == {"enqueued": True, "worker_online": False}
+    assert r.json() == {"enqueued": True, "already_running": False, "worker_online": False}
+
+
+def test_synthesize_twice_collapses_into_one_queued_run(client, monkeypatch):
+    c, _db, _task = client
+    synth = NoDelaySynthesisTask()
+    monkeypatch.setattr("mslearn.worker.tasks.synthesize_task", synth)
+    monkeypatch.setattr("mslearn.server.routers.corpus.worker_online", lambda: True)
+
+    first = c.post("/api/corpus/synthesize").json()
+    second = c.post("/api/corpus/synthesize").json()
+    third = c.post("/api/corpus/synthesize").json()
+
+    assert first == {"enqueued": True, "already_running": False, "worker_online": True}
+    assert second == {"enqueued": False, "already_running": True, "worker_online": True}
+    assert third == {"enqueued": False, "already_running": True, "worker_online": True}
+    assert synth.delayed == ["default"]  # exactly one run queued
 
 
 def test_synthesis_status_reflects_last_run_setting(client):
@@ -331,7 +350,7 @@ def test_delete_source_removes_rows_and_dirties_concepts(client, tiny_pdf, monke
 
     c, db, _task = client
     synth = NoDelaySynthesisTask()
-    monkeypatch.setattr("mslearn.server.routers.corpus.synthesize_task", synth)
+    monkeypatch.setattr("mslearn.worker.tasks.synthesize_task", synth)
 
     source_id = c.post(
         "/api/corpus/sources", json={"ref": str(tiny_pdf), "role": "spine"}

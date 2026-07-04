@@ -306,7 +306,9 @@ export function CorpusView() {
     setSynthMsg(null);
     try {
       const result = await api<SynthesizeResponse>("/api/corpus/synthesize", { method: "POST" });
-      if (!result.worker_online) {
+      if (result.already_running) {
+        setSynthMsg("Already building your course — hang tight.");
+      } else if (!result.worker_online) {
         setSynthMsg(
           "Worker offline — synthesis was queued but nothing will process it. Start the worker (make worker or make run) and try again.",
         );

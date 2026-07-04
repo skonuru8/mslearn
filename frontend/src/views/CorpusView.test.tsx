@@ -141,7 +141,11 @@ describe("CorpusView", () => {
   it("warns when synthesis is enqueued but the worker is offline", async () => {
     installFetchMock({
       ...corpusHandlers(),
-      "/api/corpus/synthesize": () => ({ enqueued: true, worker_online: false }),
+      "/api/corpus/synthesize": () => ({
+        enqueued: true,
+        already_running: false,
+        worker_online: false,
+      }),
     });
 
     renderWithProviders(<CorpusView />);
@@ -149,6 +153,23 @@ describe("CorpusView", () => {
     await userEvent.click(screen.getByRole("button", { name: "Project settings" }));
     await userEvent.click(screen.getByRole("button", { name: "Build my course from materials" }));
     await screen.findByText(/Worker offline/);
+  });
+
+  it("says the course is already building instead of queueing a duplicate", async () => {
+    installFetchMock({
+      ...corpusHandlers(),
+      "/api/corpus/synthesize": () => ({
+        enqueued: false,
+        already_running: true,
+        worker_online: true,
+      }),
+    });
+
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+    await userEvent.click(screen.getByRole("button", { name: "Project settings" }));
+    await userEvent.click(screen.getByRole("button", { name: "Build my course from materials" }));
+    await screen.findByText("Already building your course — hang tight.");
   });
 
   it("shows error banner on 422 ingest", async () => {

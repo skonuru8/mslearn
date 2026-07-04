@@ -87,6 +87,23 @@ def chunk_source_task(
             extract_chunk_task.delay(project_id, chunk.chunk_id)
 
 
+def try_enqueue_synthesis(db, project_id: str) -> bool:
+    """Single choke point every synthesis trigger routes through.
+
+    Pre-fix, the Build button, delete_source's rebuild, and
+    try_complete_source's auto-fire each called `synthesize_task.delay()`
+    directly with zero dedup — three near-simultaneous triggers could stack
+    three multi-minute runs, occupying worker slots. Returns True
+    (and enqueues) only when `db.try_mark_synthesis_queued` grants the
+    marker; False means a run is already queued or running and this trigger
+    was absorbed into it.
+    """
+    if not db.try_mark_synthesis_queued(project_id):
+        return False
+    synthesize_task.delay(project_id)
+    return True
+
+
 def _check_failure_monitor(db, source_id: str) -> None:
     stats = db.failure_stats(source_id)
     min_chunks = int(db.get_tunable("monitor.min_chunks"))
@@ -113,7 +130,7 @@ def _finalize_chunk(
     if status in ("failed", "rejected"):
         _check_failure_monitor(ctx.db, source_id)
     if ctx.db.try_complete_source(source_id):
-        synthesize_task.delay(project_id)
+        try_enqueue_synthesis(ctx.db, project_id)
 
 
 @app.task(
@@ -197,6 +214,11 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
 )
 def synthesize_task(project_id: str = "default"):
     ctx = get_context()
+    # Clear the queued marker as soon as the run actually starts (not just
+    # when it finishes) — the task is incremental/idempotent, so a trigger
+    # that lands after this point starts a fresh queued run rather than
+    # being wrongly absorbed into the one already in flight.
+    ctx.db.clear_synthesis_queued(project_id)
     ctx.db.set_project_setting(
         project_id, "synthesis:running_since", str(int(time.time()))
     )
