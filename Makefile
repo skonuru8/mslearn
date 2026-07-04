@@ -35,7 +35,10 @@ check:
 	.venv/bin/pytest
 
 graph-test:
-	docker compose up -d neo4j && sleep 20 && .venv/bin/pytest -m neo4j -v
+	docker compose --profile test up -d neo4j-test
+	@until .venv/bin/python -c "from neo4j import GraphDatabase; d = GraphDatabase.driver('bolt://localhost:7690', auth=('neo4j','learnsys-test')); d.verify_connectivity(); d.close()" 2>/dev/null; do sleep 1; done
+	MSL_TEST_NEO4J_URI=bolt://localhost:7690 .venv/bin/pytest -m neo4j -v
+	docker compose --profile test rm -sf neo4j-test
 
 # Dedicated per-queue workers: synthesis (judge) is a 10-minute reasoning run
 # that must never occupy an ingest slot and starve extraction — see

@@ -17,5 +17,18 @@ services:
     volumes:
       - neo4j_data:/data
 
+  # Throwaway instance for graph integration tests. The test fixtures WIPE
+  # the database they point at, so they must never share an instance with
+  # real data. tmpfs + no volume: state dies with the container.
+  neo4j-test:
+    image: neo4j:5-community
+    profiles: ["test"]
+    ports:
+      - "7690:7687"
+    environment:
+      NEO4J_AUTH: neo4j/learnsys-test
+    tmpfs:
+      - /data
+
 volumes:
   neo4j_data:

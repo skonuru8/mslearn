@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 
@@ -43,14 +45,23 @@ def tiny_epub(tmp_path_factory):
 @pytest.fixture(scope="session")
 def graph_store():
     from mslearn.graph.store import GraphStore
-    from mslearn.settings import Settings
 
-    settings = Settings(_env_file=None)
+    # These tests WIPE the database they connect to (clean_graph runs
+    # `MATCH (n) DETACH DELETE n`), so they must never touch the production
+    # instance. They run only against an explicitly designated test target.
+    uri = os.environ.get("MSL_TEST_NEO4J_URI")
+    if not uri:
+        pytest.skip(
+            "graph integration tests are destructive; run them via `make graph-test`"
+            " (or set MSL_TEST_NEO4J_URI to a disposable Neo4j instance)"
+        )
+    user = os.environ.get("MSL_TEST_NEO4J_USER", "neo4j")
+    password = os.environ.get("MSL_TEST_NEO4J_PASSWORD", "learnsys-test")
     try:
-        store = GraphStore(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+        store = GraphStore(uri, user, password)
         store.ping()
     except Exception:
-        pytest.skip("neo4j not reachable — start it with `make services`")
+        pytest.skip(f"test neo4j not reachable at {uri} — `make graph-test` starts one")
     store.ensure_schema()
     yield store
     store.close()

@@ -148,7 +148,9 @@ source, slow for big ones.
 
 ```bash
 make check        # ruff + full offline pytest suite
-make graph-test   # Neo4j integration tests (starts container)
+make graph-test   # Neo4j integration tests — runs against a DISPOSABLE
+                  # throwaway container (port 7690); these tests wipe the DB
+                  # they target and never touch your real data
 make ui-test      # frontend vitest suite
 cd frontend && npm run dev   # hot-reload UI on :5173 (proxies /api to :8000)
 ```
