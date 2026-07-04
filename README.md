@@ -77,21 +77,29 @@ cp .env.example .env        # fill in MSL_OPENROUTER_API_KEY
 make ui-build               # build the web UI once
 ```
 
-### Every time you use it — three things must be running
+### Every time you use it — four things must be running
 ```bash
-make run        # starts all three below, in order, Ctrl-C stops the worker + API
+make run        # starts all four below, in order, Ctrl-C stops both workers + API
 ```
-Or run them separately (useful for debugging one process at a time):
+Or run them separately (useful for debugging one process at a time — `make
+worker` and `make worker-judge` each need their own terminal):
 ```bash
-make services   # 1. Redis + Neo4j containers (browser: http://localhost:7474)
-make worker     # 2. background worker — DOES THE ACTUAL READING/INGESTION
-make serve      # 3. web app → http://localhost:8000
+make services      # 1. Redis + Neo4j containers (browser: http://localhost:7474)
+make worker        # 2. ingest worker — DOES THE ACTUAL READING/EXTRACTION
+make worker-judge  # 3. judge worker — synthesis only, kept off the ingest queue
+make serve         # 4. web app → http://localhost:8000
 ```
 
-> **Important:** `make serve` alone is not enough. Without a worker running,
-> uploaded sources sit in the queue forever and **Run synthesis does nothing** —
-> the button only *enqueues* a job; the worker is what executes it. The app
-> header shows a "Background worker running" / "Worker offline" chip
+Ingest and synthesis run as **two separate Celery workers**, each consuming
+its own queue (`ingest`, `judge`). A synthesis pass can take minutes of model
+reasoning; if it shared worker slots with extraction it would stall every
+other source's ingestion for the duration. Splitting the queues means adding
+a source while a synthesis run is in flight still extracts immediately.
+
+> **Important:** `make serve` alone is not enough. Without both workers
+> running, uploaded sources sit in the queue forever and **Run synthesis does
+> nothing** — the button only *enqueues* a job; a worker is what executes it.
+> The app header shows a "Background worker running" / "Worker offline" chip
 > (`GET /api/admin/health`) so this is never silent.
 
 ### Using the web app
@@ -176,8 +184,10 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
 - **Pipeline** (`mslearn/pipeline/`): LangGraph extraction graph
   (extract→validate→retry→escalate), synthesis (vector-blocked clustering with
   judge verdicts → conflict scan → Kahn topological curriculum).
-- **Workers** (`mslearn/worker/`): Celery queues `ingest`/`judge`, per-process
-  context (fork-safe), durable chunk jobs in SQLite (`data/ops.db`, WAL).
+- **Workers** (`mslearn/worker/`): two dedicated Celery processes, one per
+  queue (`ingest`, `judge`) — synthesis can never occupy an ingest slot,
+  per-process context (fork-safe), durable chunk jobs in SQLite
+  (`data/ops.db`, WAL).
 - **Providers** (`mslearn/providers/`): Ollama / OpenRouter / Claude Code
   behind one `ModelProvider` interface; every call logged to `model_calls`.
 - **Memory** (`mslearn/memory/`): mem0 on the same Neo4j, personalization

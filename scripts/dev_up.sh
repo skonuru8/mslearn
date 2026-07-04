@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# One command to run the whole app: Redis + Neo4j containers, the Celery
-# worker, and the API — trapped so a single Ctrl-C shuts everything down
-# cleanly.
+# One command to run the whole app: Redis + Neo4j containers, two dedicated
+# Celery workers (ingest, judge), and the API — trapped so a single Ctrl-C
+# shuts everything down cleanly.
 #
-# `make serve` alone is NOT enough (see README "three things must be
-# running"): without the worker process, uploaded sources sit in the queue
-# forever and "Run synthesis" silently enqueues into the void. This script
-# starts all three.
+# `make serve` alone is NOT enough (see README "four things must be
+# running"): without the worker processes, uploaded sources sit in the queue
+# forever and "Run synthesis" silently enqueues into the void. Two workers,
+# not one consuming both queues, so a multi-minute synthesis run can never
+# starve extraction of its worker slots. This script starts all four.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -46,23 +47,32 @@ driver.verify_connectivity()
 driver.close()
 "
 
-WORKER_PID=""
+INGEST_WORKER_PID=""
+JUDGE_WORKER_PID=""
 API_PID=""
 
 cleanup() {
   echo
-  echo "== shutting down worker + API (containers keep running; 'make services-down' to stop those) =="
-  [ -n "$WORKER_PID" ] && kill "$WORKER_PID" 2>/dev/null || true
+  echo "== shutting down workers + API (containers keep running; 'make services-down' to stop those) =="
+  [ -n "$INGEST_WORKER_PID" ] && kill "$INGEST_WORKER_PID" 2>/dev/null || true
+  [ -n "$JUDGE_WORKER_PID" ] && kill "$JUDGE_WORKER_PID" 2>/dev/null || true
   [ -n "$API_PID" ] && kill "$API_PID" 2>/dev/null || true
-  wait "$WORKER_PID" "$API_PID" 2>/dev/null || true
+  wait "$INGEST_WORKER_PID" "$JUDGE_WORKER_PID" "$API_PID" 2>/dev/null || true
 }
 trap cleanup INT TERM
 
-echo "== starting Celery worker =="
-# -l warning: task noise goes to ingest_sources.error / the failures
-# endpoint, not the terminal; real problems still print.
-.venv/bin/celery -A mslearn.worker.app worker -Q ingest,judge --concurrency=2 -l warning &
-WORKER_PID=$!
+# Dedicated per-queue workers, not one worker consuming both: a synthesis
+# (judge) run is a multi-minute reasoning task that must never occupy an
+# ingest slot, or it starves extraction for the whole run (see plan
+# 2026-07-03-12). -l warning: task noise goes to ingest_sources.error / the
+# failures endpoint, not the terminal; real problems still print.
+echo "== starting Celery ingest worker =="
+.venv/bin/celery -A mslearn.worker.app worker -Q ingest --concurrency=2 -n ingest@%h -l warning &
+INGEST_WORKER_PID=$!
+
+echo "== starting Celery judge (synthesis) worker =="
+.venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=1 -n judge@%h -l warning &
+JUDGE_WORKER_PID=$!
 
 DIST_INDEX="frontend/dist/index.html"
 if [ ! -f "$DIST_INDEX" ]; then
@@ -79,6 +89,6 @@ echo "== starting API (uvicorn) =="
 API_PID=$!
 
 echo
-echo "mslearn is up: http://localhost:8000 (Ctrl-C to stop the worker + API)"
+echo "mslearn is up: http://localhost:8000 (Ctrl-C to stop the workers + API)"
 
-wait "$WORKER_PID" "$API_PID"
+wait "$INGEST_WORKER_PID" "$JUDGE_WORKER_PID" "$API_PID"

@@ -1,4 +1,4 @@
-.PHONY: services services-down test check graph-test worker serve run ui-build ui-test
+.PHONY: services services-down test check graph-test worker worker-judge serve run ui-build ui-test
 
 serve:
 	.venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000
@@ -37,5 +37,12 @@ check:
 graph-test:
 	docker compose up -d neo4j && sleep 20 && .venv/bin/pytest -m neo4j -v
 
+# Dedicated per-queue workers: synthesis (judge) is a 10-minute reasoning run
+# that must never occupy an ingest slot and starve extraction — see
+# docs/superpowers/plans/2026-07-03-12-worker-isolation-and-synthesis-dedup.md.
+# Run both (e.g. two terminals, or `make run`) for the full app.
 worker:
-	.venv/bin/celery -A mslearn.worker.app worker -Q ingest,judge --concurrency=2 -l info
+	.venv/bin/celery -A mslearn.worker.app worker -Q ingest --concurrency=2 -n ingest@%h -l info
+
+worker-judge:
+	.venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=1 -n judge@%h -l info
