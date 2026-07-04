@@ -299,3 +299,16 @@ def test_synthesis_success_clears_last_error(ctx, monkeypatch):
     monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
     worker_tasks.synthesize_task.delay("default").get()
     assert not context.db.get_project_setting("default", "synthesis:last_error")
+
+
+def test_all_tasks_routed_to_consumed_queues():
+    """An unrouted task lands in the default 'celery' queue, which no worker
+    consumes (dev_up.sh / make worker consume ingest,judge only) — the task
+    silently never runs. Every mslearn task must have an explicit route."""
+    consumed = {"ingest", "judge"}
+    routes = app.conf.task_routes
+    mslearn_tasks = [name for name in app.tasks if name.startswith("mslearn.")]
+    assert mslearn_tasks, "task autodiscovery broken"
+    for name in mslearn_tasks:
+        assert name in routes, f"{name} has no task_routes entry"
+        assert routes[name].get("queue") in consumed, f"{name} routed to unconsumed queue"

@@ -13,7 +13,12 @@ app.conf.update(
     task_ignore_result=False,
     result_backend="cache+memory://",  # eager tests read results; prod workers don't rely on it
     broker_connection_retry_on_startup=True,
+    # Every task MUST be routed to a queue the worker consumes (ingest, judge)
+    # — an unrouted task lands in the default "celery" queue, which nothing
+    # consumes, and its source sits in "Preparing…" forever. Guarded by
+    # test_all_tasks_routed_to_consumed_queues.
     task_routes={
+        "mslearn.worker.tasks.chunk_source_task": {"queue": "ingest"},
         "mslearn.worker.tasks.extract_chunk_task": {"queue": "ingest"},
         "mslearn.worker.tasks.synthesize_task": {"queue": "judge"},
     },
