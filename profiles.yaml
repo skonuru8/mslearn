@@ -4,15 +4,15 @@ default_profile: openrouter
 profiles:
   openrouter:
     roles:
-      extraction:  {provider: openrouter,     model: "deepseek/deepseek-v4-flash"}
-      synthesis:   {provider: openrouter, model: "deepseek/deepseek-v4-flash"}
-      # Plan 11 Task 7 (empirical, live-verified 2026-07-03): v4-flash honors
-      # reasoning.enabled=false — reasoning_tokens drops to 0, content comes
-      # back immediately, and cost dropped ~4x on the probe call. Replaces
-      # deepseek-chat so interactive (chat/teach/quiz) shares the same model
-      # as extraction/synthesis/evals without paying for hidden reasoning.
+      # reasoning.enabled=false everywhere (live-verified 2026-07-03: v4-flash
+      # honors it — reasoning_tokens 0, immediate content, ~4x cheaper). All
+      # four roles are schema-constrained extraction/classification calls;
+      # with reasoning on, one video's synthesis took 78+ minutes and single
+      # judgment calls ran 5-19s each.
+      extraction:  {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
+      synthesis:   {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
       interactive: {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
-      evals:       {provider: openrouter, model: "deepseek/deepseek-v4-flash"}
+      evals:       {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
       embedding:   {provider: ollama,     model: "nomic-embed-text"}
 
   claude-code:
