@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 import respx
 
@@ -189,3 +190,16 @@ def test_params_cannot_override_reserved_keys():
     sent = json.loads(route.calls[0].request.content)
     assert sent["model"] == "real-model" and sent["stream"] is False
     assert sent["temperature"] == 0.3  # non-reserved params still pass through
+
+
+def test_default_timeout_bounds_connect_and_pool_separately():
+    # A single flat 600s timeout let connect/pool exhaustion masquerade as a
+    # long model read (incident: a request "read" for 4,601s before the
+    # connection layer noticed the socket was dead). Connect/pool must fail
+    # fast; only the model's own response time keeps the generous budget.
+    timeout = OpenRouterProvider("k")._client.timeout
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.connect == 15.0
+    assert timeout.read == 600.0
+    assert timeout.write == 60.0
+    assert timeout.pool == 60.0

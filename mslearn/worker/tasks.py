@@ -2,6 +2,8 @@ import json
 import logging
 import time
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from mslearn.adapters.registry import load_source
 from mslearn.chunking import chunk_source
 from mslearn.pipeline.contracts import to_claim_record
@@ -49,6 +51,12 @@ def _source_prep_stale(db, source_id: str, project_id: str, entry_ts: float) -> 
     autoretry_for=(ProviderTransientError,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
+    # A wedged adapter load (e.g. a hung whisper transcription or a frozen
+    # model-call socket) must die and release its worker slot instead of
+    # occupying it for hours — soft gives the except-clause below a chance
+    # to write the source's error state; hard is the backstop.
+    soft_time_limit=1800,
+    time_limit=2100,
 )
 def chunk_source_task(
     self,
@@ -95,6 +103,13 @@ def chunk_source_task(
 
     try:
         doc = load_source(ref, source_type=source_type, role=role)
+    except SoftTimeLimitExceeded:
+        if not _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
+            ctx.db.set_source_status(
+                source_id, "failed", error="loading exceeded the time limit and was aborted"
+            )
+        logger.warning("source %s preparation aborted: load exceeded soft time limit", source_id)
+        raise
     except Exception as exc:
         if _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
             return
@@ -105,6 +120,15 @@ def chunk_source_task(
     chunks = chunk_source(doc)
     try:
         embeddings = ctx.router.embed([c.text for c in chunks]) if chunks else []
+    except SoftTimeLimitExceeded:
+        if not _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
+            ctx.db.set_source_status(
+                source_id, "failed", error="embedding exceeded the time limit and was aborted"
+            )
+        logger.warning(
+            "source %s preparation aborted: embedding exceeded soft time limit", source_id
+        )
+        raise
     except ProviderTransientError as exc:
         if self.request.retries >= self.max_retries:
             if _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
@@ -189,6 +213,10 @@ def _finalize_chunk(
     autoretry_for=(ProviderTransientError,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
+    # See chunk_source_task: a wedged model call must release its slot
+    # instead of occupying it for hours.
+    soft_time_limit=1800,
+    time_limit=2100,
 )
 def extract_chunk_task(self, project_id: str, chunk_id: str):
     ctx = get_context()
@@ -213,6 +241,12 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
 
     try:
         state = run_extraction(ctx.router, ctx.db, chunk_id, chunk["text"])
+    except SoftTimeLimitExceeded:
+        _finalize_chunk(
+            ctx, project_id, source_id, chunk_id, "failed",
+            "extraction exceeded the time limit and was aborted",
+        )
+        raise
     except ProviderTransientError as exc:
         if self.request.retries >= self.max_retries:
             _finalize_chunk(
@@ -246,6 +280,12 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
                     draft, chunk_id=chunk_id, source_id=chunk["source_id"], trust=trust
                 )
                 ctx.graph.upsert_claim(record, embedding, project_id=project_id)
+    except SoftTimeLimitExceeded:
+        _finalize_chunk(
+            ctx, project_id, source_id, chunk_id, "failed",
+            "commit exceeded the time limit and was aborted",
+        )
+        raise
     except ProviderTransientError:
         raise
     except Exception as exc:
@@ -269,6 +309,11 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
     autoretry_for=(ProviderTransientError,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
+    # A wedged model call (the incident: one request survived the 600s httpx
+    # read timeout entirely, apparently a machine-sleep-frozen socket) must
+    # not occupy a worker slot indefinitely — die and free it instead.
+    soft_time_limit=3600,
+    time_limit=3900,
 )
 def synthesize_task(project_id: str = "default"):
     ctx = get_context()
@@ -295,6 +340,18 @@ def synthesize_task(project_id: str = "default"):
             project_id, "synthesis:running_since", str(int(time.time()))
         )
         ordered = build_curriculum(ctx, project_id)
+    except SoftTimeLimitExceeded:
+        logger.warning("synthesis exceeded soft time limit for project %s", project_id)
+        ctx.db.set_project_setting(
+            project_id,
+            "synthesis:last_error",
+            json.dumps(
+                {"ts": int(time.time()), "error": "synthesis exceeded the time limit and was aborted"},
+                sort_keys=True,
+            ),
+        )
+        ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
+        raise
     except Exception as exc:
         logger.exception("synthesis failed for project %s", project_id)
         ctx.db.set_project_setting(

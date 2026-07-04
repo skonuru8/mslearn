@@ -15,6 +15,13 @@ from mslearn.providers.base import (
 
 _BASE = "https://openrouter.ai/api/v1"
 
+# A single flat timeout let connect/pool exhaustion masquerade as a long
+# model read: a machine-sleep-frozen socket once "read" for 4,601s before
+# the connection layer noticed anything was wrong. Bound each phase
+# separately — connect/pool failures surface in seconds, only the model's
+# own response time gets the generous budget reasoning models need.
+_DEFAULT_TIMEOUT = httpx.Timeout(connect=15.0, read=600.0, write=60.0, pool=60.0)
+
 
 def _json(resp: httpx.Response) -> dict:
     try:
@@ -28,7 +35,7 @@ class OpenRouterProvider(ModelProvider):
 
     # Reasoning models on big synthesis prompts can legitimately take >5 min;
     # a 300s read timeout was killing whole synthesis runs mid-flight.
-    def __init__(self, api_key: str, timeout: float = 600.0):
+    def __init__(self, api_key: str, timeout: httpx.Timeout | float = _DEFAULT_TIMEOUT):
         key = (api_key or "").strip()
         if not key:
             raise ProviderError(

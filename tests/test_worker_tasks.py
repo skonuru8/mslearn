@@ -1,4 +1,5 @@
 import pytest
+from celery.exceptions import SoftTimeLimitExceeded
 
 from mslearn.adapters.base import make_source_id
 from mslearn.opsdb import OpsDB
@@ -391,6 +392,72 @@ def test_synthesize_task_retries_transient_provider_errors():
     from mslearn.providers.base import ProviderTransientError as PTE
 
     assert PTE in worker_tasks.synthesize_task.autoretry_for
+
+
+def test_hung_tasks_have_soft_and_hard_time_limits():
+    # A wedged task (the incident: a request survived the 600s httpx read
+    # timeout entirely) must die and release its worker slot instead of
+    # occupying it for hours. Hard limit always leaves headroom past soft so
+    # the except-clause gets a chance to write error state first.
+    for task, soft, hard in [
+        (worker_tasks.chunk_source_task, 1800, 2100),
+        (worker_tasks.extract_chunk_task, 1800, 2100),
+        (worker_tasks.synthesize_task, 3600, 3900),
+    ]:
+        assert task.soft_time_limit == soft
+        assert task.time_limit == hard
+        assert task.time_limit > task.soft_time_limit
+
+
+def test_extract_chunk_soft_time_limit_marks_chunk_failed(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+
+    def boom(router, db, chunk_id, text):
+        raise SoftTimeLimitExceeded()
+
+    monkeypatch.setattr(worker_tasks, "run_extraction", boom)
+    with pytest.raises(SoftTimeLimitExceeded):
+        worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
+    assert context.db.failure_stats("s1")["failed"] == 1
+
+
+def test_chunk_source_soft_time_limit_marks_source_failed(tmp_path, tiny_pdf):
+    class Wedged:
+        def embed(self, texts):
+            raise SoftTimeLimitExceeded()
+
+        def complete(self, role, request):
+            raise AssertionError("chunk_source_task must not call complete()")
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    source_id = make_source_id(str(tiny_pdf))
+    db.register_source(source_id, ref=str(tiny_pdf), role="spine", total_chunks=0)
+    db.set_source_status(source_id, "chunking")
+    set_context(PipelineContext(settings=None, db=db, router=Wedged(), graph=graph))
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        worker_tasks.chunk_source_task.delay(
+            "default", source_id, str(tiny_pdf), "spine", "pdf", False
+        ).get()
+
+    row = db.source_row(source_id)
+    assert row["status"] == "failed"
+    assert "time limit" in row["error"]
+
+
+def test_synthesize_soft_time_limit_records_error_and_clears_running_since(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+
+    def boom(c, p):
+        raise SoftTimeLimitExceeded()
+
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", boom)
+    with pytest.raises(SoftTimeLimitExceeded):
+        worker_tasks.synthesize_task.delay("default").get()
+    raw = context.db.get_project_setting("default", "synthesis:last_error")
+    assert raw and "time limit" in raw
+    assert not context.db.get_project_setting("default", "synthesis:running_since")
 
 
 def test_synthesis_sets_and_clears_running_since(ctx, monkeypatch):
