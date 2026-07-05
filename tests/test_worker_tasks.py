@@ -476,6 +476,43 @@ def test_synthesis_sets_and_clears_running_since(ctx, monkeypatch):
     assert not context.db.get_project_setting("default", "synthesis:running_since")
 
 
+def test_synthesis_sets_and_clears_progress(ctx, monkeypatch):
+    import json
+
+    context = ctx(ScriptedRouter([]))
+    seen = {}
+
+    def snapshot_grouping(c, p):
+        raw = context.db.get_project_setting("default", "synthesis:progress")
+        seen["grouping"] = json.loads(raw) if raw else None
+        return []
+
+    def snapshot_ordering(c, p):
+        raw = context.db.get_project_setting("default", "synthesis:progress")
+        seen["ordering"] = json.loads(raw) if raw else None
+        return []
+
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", snapshot_grouping)
+    monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
+    monkeypatch.setattr(worker_tasks, "build_curriculum", snapshot_ordering)
+    worker_tasks.synthesize_task.delay("default").get()
+    assert seen["grouping"]["phase"] == "grouping"
+    assert seen["ordering"]["phase"] == "ordering"
+    # cleared once the run finishes, like running_since
+    assert not context.db.get_project_setting("default", "synthesis:progress")
+
+
+def test_synthesis_failure_clears_progress(ctx, monkeypatch):
+    context = ctx(ScriptedRouter([]))
+    monkeypatch.setattr(
+        worker_tasks, "cluster_new_claims",
+        lambda c, p: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError):
+        worker_tasks.synthesize_task.delay("default").get()
+    assert not context.db.get_project_setting("default", "synthesis:progress")
+
+
 def test_synthesis_heartbeat_refreshes_between_phases(ctx, monkeypatch):
     # The 107-chunk-video incident ran 78+ minutes on one project; without a
     # heartbeat, the status endpoint's abandoned-build self-heal (2x the

@@ -13,7 +13,12 @@ import type {
 } from "../api/types";
 import { useProject } from "../context/ProjectContext";
 import { ErrorBanner, Loading } from "../components/Status";
-import { detectSourceTypeFromUrl, sourceStatusLabel, translateError } from "../utils/userMessages";
+import {
+  detectSourceTypeFromUrl,
+  formatSynthesisProgress,
+  sourceStatusLabel,
+  translateError,
+} from "../utils/userMessages";
 
 type AddTab = "file" | "link";
 
@@ -468,8 +473,8 @@ export function CorpusView() {
       {synthesisStatus?.running_since ? (
         <div className="synth-notice">
           Building your course from what was read… started{" "}
-          {formatSynthesisAgo(synthesisStatus.running_since)}. Topics appear in My course when it
-          finishes.
+          {formatSynthesisAgo(synthesisStatus.running_since)}. {formatSynthesisProgress(synthesisStatus.progress)}{" "}
+          Topics appear in My course when it finishes.
         </div>
       ) : null}
       {lastRun ? (

@@ -86,6 +86,13 @@ export interface HealthResponse {
   neo4j: boolean;
 }
 
+export interface SynthesisProgress {
+  phase: "grouping" | "analyzing" | "ordering";
+  done: number;
+  total: number;
+  ts: number;
+}
+
 export interface SynthesisStatusResponse {
   last_run: {
     ts: number;
@@ -95,6 +102,7 @@ export interface SynthesisStatusResponse {
   } | null;
   last_error?: { ts: number; error: string } | null;
   running_since?: number | null;
+  progress?: SynthesisProgress | null;
 }
 
 export interface SpendTotals {

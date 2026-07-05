@@ -182,3 +182,36 @@ def test_synthesis_requests_carry_configured_max_tokens(tmp_path):
 
     assert router.calls == ["synthesis", "synthesis"]
     assert all(req.max_tokens == 4096 for req in router.requests)
+
+
+def test_process_dirty_concepts_writes_progress_per_concept(tmp_path):
+    # The "analyzing" phase runs two model calls per concept and dominated
+    # the 78-minute incident run — the UI needs "n of m", not a bare spinner.
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name="A"))
+    graph.upsert_concept(ConceptRecord(concept_id="k2", name="B"))
+    graph.add_claim("c1", "claim one", "neutral", "s1", [1.0, 0.0])
+    graph.add_claim("c2", "claim two", "neutral", "s2", [0.9, 0.0])
+    graph.assign_claim("c1", "k1")
+    graph.assign_claim("c2", "k2")
+    graph.mark_concept_dirty("k1", True)
+    graph.mark_concept_dirty("k2", True)
+
+    router = CapturingRouter(
+        outputs=[
+            {"name": "Concept A", "summary": "..."},
+            {"name": "Concept B", "summary": "..."},
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+
+    process_dirty_concepts(ctx)
+
+    raw = db.get_project_setting("default", "synthesis:progress")
+    assert raw is not None
+    progress = json.loads(raw)
+    # Two dirty concepts (single claim each, no conflict-scan call) processed
+    # in concept_id order — the final write left on disk is the last one.
+    assert progress["phase"] == "analyzing"
+    assert progress["done"] == progress["total"] == 2

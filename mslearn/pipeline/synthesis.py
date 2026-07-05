@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import time
 from collections import defaultdict
 
 from mslearn.graph.records import CONFLICT_CLASSIFICATIONS, ConceptRecord
@@ -169,13 +171,14 @@ def process_dirty_concepts(ctx, project_id: str = "default") -> int:
     graph = ctx.graph
     db = ctx.db
     dirty_ids = graph.dirty_concepts(project_id=project_id)
+    total = len(dirty_ids)
     conflict_prompt = get_prompt(db, "conflict_scan")
     name_prompt = get_prompt(db, "concept_name")
     profile = get_domain_profile(db, project_id)
     guidance = domain_guidance(profile)
     drops = 0
 
-    for concept_id in dirty_ids:
+    for done, concept_id in enumerate(dirty_ids, start=1):
         claims = graph.claims_in_concept(concept_id, project_id=project_id)
         claim_ids = {c["claim_id"] for c in claims}
 
@@ -245,6 +248,18 @@ def process_dirty_concepts(ctx, project_id: str = "default") -> int:
             project_id=project_id,
         )
         graph.mark_concept_dirty(concept_id, False, project_id=project_id)
+
+        # Per-concept progress so the UI can show "Analyzing topics... n of
+        # m" instead of a bare spinner — this phase runs two model calls per
+        # concept and dominated the 78-minute incident run.
+        db.set_project_setting(
+            project_id,
+            "synthesis:progress",
+            json.dumps(
+                {"phase": "analyzing", "done": done, "total": total, "ts": int(time.time())},
+                sort_keys=True,
+            ),
+        )
 
     if drops > 0:
         logger.warning("process_dirty_concepts: dropped %d conflict item(s) total", drops)

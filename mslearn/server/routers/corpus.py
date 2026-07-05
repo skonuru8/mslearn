@@ -231,9 +231,11 @@ def synthesis_status(ctx=Depends(get_ctx), project_id: str = Depends(get_project
     raw = ctx.db.get_project_setting(project_id, "synthesis:last_run")
     raw_error = ctx.db.get_project_setting(project_id, "synthesis:last_error")
     running_since = ctx.db.get_project_setting(project_id, "synthesis:running_since")
+    raw_progress = ctx.db.get_project_setting(project_id, "synthesis:progress")
     last_run = json.loads(raw) if raw is not None else None
     last_error = json.loads(raw_error) if raw_error else None
     running_ts = int(running_since) if running_since else None
+    progress = json.loads(raw_progress) if raw_progress else None
 
     # Self-heal an abandoned build: a worker that died or was force-restarted
     # mid-run leaves `running_since` set forever, so the UI would show
@@ -246,6 +248,7 @@ def synthesis_status(ctx=Depends(get_ctx), project_id: str = Depends(get_project
     # — this synthetic value is response-only.
     if running_ts is not None and time.time() - running_ts > 2 * SYNTHESIS_RUNNING_TTL_S:
         ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
+        ctx.db.set_project_setting(project_id, "synthesis:progress", "")
         fresher_run = last_run is not None and last_run.get("ts", 0) >= running_ts
         if not fresher_run:
             last_error = {
@@ -253,9 +256,11 @@ def synthesis_status(ctx=Depends(get_ctx), project_id: str = Depends(get_project
                 "error": "course build was interrupted — press Build to restart",
             }
         running_ts = None
+        progress = None
 
     return {
         "last_run": last_run,
         "last_error": last_error,
         "running_since": running_ts,
+        "progress": progress,
     }

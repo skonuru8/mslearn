@@ -1,3 +1,25 @@
+import type { SynthesisProgress } from "../api/types";
+
+/** Plain-language building-status text for a live synthesis run, so "Building
+ * your course..." doesn't sit as a bare spinner for the many minutes a big
+ * source can take. */
+export function formatSynthesisProgress(progress: SynthesisProgress | null | undefined): string {
+  if (!progress) {
+    return "Your materials are read — now the topics are being organized, named, and put in learning order.";
+  }
+  switch (progress.phase) {
+    case "analyzing":
+      return progress.total > 0
+        ? `Analyzing topics… ${progress.done} of ${progress.total}`
+        : "Analyzing topics…";
+    case "ordering":
+      return "Putting your course in learning order…";
+    case "grouping":
+    default:
+      return "Grouping new material into topics…";
+  }
+}
+
 /** Plain-language labels for source pipeline statuses. */
 export function sourceStatusLabel(status: string): string {
   switch (status) {

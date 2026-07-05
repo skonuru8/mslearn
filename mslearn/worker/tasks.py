@@ -162,6 +162,14 @@ def chunk_source_task(
             extract_chunk_task.delay(project_id, chunk.chunk_id)
 
 
+def _write_synthesis_progress(db, project_id: str, *, phase: str, done: int, total: int, ts: float) -> None:
+    db.set_project_setting(
+        project_id,
+        "synthesis:progress",
+        json.dumps({"phase": phase, "done": done, "total": total, "ts": int(ts)}, sort_keys=True),
+    )
+
+
 def try_enqueue_synthesis(db, project_id: str) -> bool:
     """Single choke point every synthesis trigger routes through.
 
@@ -322,9 +330,13 @@ def synthesize_task(project_id: str = "default"):
     # that lands after this point starts a fresh queued run rather than
     # being wrongly absorbed into the one already in flight.
     ctx.db.clear_synthesis_queued(project_id)
-    ctx.db.set_project_setting(
-        project_id, "synthesis:running_since", str(int(time.time()))
-    )
+    now = time.time()
+    ctx.db.set_project_setting(project_id, "synthesis:running_since", str(int(now)))
+    # Grouping/ordering are single model-call-per-item at most and don't have
+    # a cheap upfront total, so they report phase only; process_dirty_concepts
+    # (below) writes its own n-of-m progress every concept — it runs two
+    # model calls per concept and dominated the 78-minute incident run.
+    _write_synthesis_progress(ctx.db, project_id, phase="grouping", done=0, total=0, ts=now)
     logger.info("synthesis started project=%s", project_id)
     try:
         dirty = cluster_new_claims(ctx, project_id)
@@ -332,13 +344,12 @@ def synthesize_task(project_id: str = "default"):
         # incident ran 78+ minutes) must keep refreshing running_since so the
         # status endpoint's abandoned-build self-heal never trips on a run
         # that's still making progress.
-        ctx.db.set_project_setting(
-            project_id, "synthesis:running_since", str(int(time.time()))
-        )
+        now = time.time()
+        ctx.db.set_project_setting(project_id, "synthesis:running_since", str(int(now)))
         processed = process_dirty_concepts(ctx, project_id)
-        ctx.db.set_project_setting(
-            project_id, "synthesis:running_since", str(int(time.time()))
-        )
+        now = time.time()
+        ctx.db.set_project_setting(project_id, "synthesis:running_since", str(int(now)))
+        _write_synthesis_progress(ctx.db, project_id, phase="ordering", done=0, total=0, ts=now)
         ordered = build_curriculum(ctx, project_id)
     except SoftTimeLimitExceeded:
         logger.warning("synthesis exceeded soft time limit for project %s", project_id)
@@ -351,6 +362,7 @@ def synthesize_task(project_id: str = "default"):
             ),
         )
         ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
+        ctx.db.set_project_setting(project_id, "synthesis:progress", "")
         raise
     except Exception as exc:
         logger.exception("synthesis failed for project %s", project_id)
@@ -360,6 +372,7 @@ def synthesize_task(project_id: str = "default"):
             json.dumps({"ts": int(time.time()), "error": str(exc)[:500]}, sort_keys=True),
         )
         ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
+        ctx.db.set_project_setting(project_id, "synthesis:progress", "")
         raise
     payload = {
         "ts": int(time.time()),
@@ -372,6 +385,7 @@ def synthesize_task(project_id: str = "default"):
     )
     ctx.db.set_project_setting(project_id, "synthesis:last_error", "")
     ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
+    ctx.db.set_project_setting(project_id, "synthesis:progress", "")
     logger.info(
         "synthesis done project=%s processed=%d curriculum=%d",
         project_id, processed, len(ordered),

@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { ConceptMeta, SynthesisStatusResponse } from "../api/types";
+import type { ConceptMeta, SynthesisProgress, SynthesisStatusResponse } from "../api/types";
 import { useProject } from "../context/ProjectContext";
 import { ErrorBanner, Loading } from "../components/Status";
+import { formatSynthesisProgress } from "../utils/userMessages";
 
 export function CurriculumView() {
   const { projectId } = useProject();
   const [concepts, setConcepts] = useState<ConceptMeta[]>([]);
   const [building, setBuilding] = useState(false);
+  const [progress, setProgress] = useState<SynthesisProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,6 +21,7 @@ export function CurriculumView() {
     ]);
     setConcepts(rows);
     setBuilding(Boolean(synth?.running_since));
+    setProgress(synth?.progress ?? null);
     setError(null);
   }, []);
 
@@ -63,9 +66,8 @@ export function CurriculumView() {
         <div className="onboarding-card">
           <h2>Building your course…</h2>
           <p>
-            Your materials are read — now the topics are being organized, named, and put in
-            learning order. This can take several minutes for a big source. This page refreshes
-            itself; no need to reload.
+            {formatSynthesisProgress(progress)} This can take several minutes for a big source.
+            This page refreshes itself; no need to reload.
           </p>
         </div>
       ) : concepts.length === 0 ? (

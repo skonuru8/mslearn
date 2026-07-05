@@ -296,7 +296,9 @@ def test_synthesis_status_reflects_last_run_setting(client):
     c, db, _task = client
     r = c.get("/api/corpus/synthesis/status")
     assert r.status_code == 200
-    assert r.json() == {"last_run": None, "last_error": None, "running_since": None}
+    assert r.json() == {
+        "last_run": None, "last_error": None, "running_since": None, "progress": None,
+    }
 
     db.set_project_setting(
         "default", "synthesis:last_run",
@@ -307,6 +309,7 @@ def test_synthesis_status_reflects_last_run_setting(client):
         "last_run": {"ts": 123, "dirty_concepts": 2, "processed_concepts": 2, "curriculum_len": 5},
         "last_error": None,
         "running_since": None,
+        "progress": None,
     }
 
 
@@ -375,6 +378,35 @@ def test_synthesis_status_surfaces_last_error(client):
     )
     r = c.get("/api/corpus/synthesis/status")
     assert r.json()["last_error"] == {"ts": 5, "error": "boom"}
+
+
+def test_synthesis_status_surfaces_progress(client):
+    c, db, _task = client
+    db.set_project_setting(
+        "default", "synthesis:progress",
+        json.dumps({"phase": "analyzing", "done": 12, "total": 29, "ts": 5}),
+    )
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json()["progress"] == {"phase": "analyzing", "done": 12, "total": 29, "ts": 5}
+
+    db.set_project_setting("default", "synthesis:progress", "")
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json()["progress"] is None
+
+
+def test_synthesis_status_self_heal_clears_progress_too(client):
+    from mslearn.opsdb import SYNTHESIS_RUNNING_TTL_S
+
+    c, db, _task = client
+    stale = int(time.time()) - int(2.5 * SYNTHESIS_RUNNING_TTL_S)
+    db.set_project_setting("default", "synthesis:running_since", str(stale))
+    db.set_project_setting(
+        "default", "synthesis:progress",
+        json.dumps({"phase": "analyzing", "done": 3, "total": 10, "ts": stale}),
+    )
+    r = c.get("/api/corpus/synthesis/status")
+    assert r.json()["progress"] is None
+    assert not db.get_project_setting("default", "synthesis:progress")
 
     db.set_project_setting("default", "synthesis:last_error", "")
     r = c.get("/api/corpus/synthesis/status")
