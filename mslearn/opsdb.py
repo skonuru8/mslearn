@@ -139,6 +139,10 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "quiz.max_tokens": 8192.0,
     "teach.max_tokens": 8192.0,
     "evolve.max_tokens": 8192.0,
+    # Image transcription output can be long (a dense screenshot / slide with
+    # lots of text). The vision model is not a reasoning model, so this is a
+    # pure output budget.
+    "image.max_tokens": 4096.0,
 }
 
 

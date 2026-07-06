@@ -498,3 +498,20 @@ def test_delete_while_chunking_prevents_resurrection(tmp_path, monkeypatch, tiny
             celery_app.conf.task_always_eager = False
         assert db.source_row(source_id) is None
         assert graph.sources == {}
+
+
+def test_upload_image_file_accepted_and_ingests(client, monkeypatch):
+    c, db, _fake_task = client
+    monkeypatch.setattr(
+        "mslearn.worker.tasks.image_describe_via_router",
+        lambda router, opsdb: (lambda b, mt: "Revenue grew 20% in Q4.\n\n[image: line chart]"),
+    )
+    r = c.post(
+        "/api/corpus/upload",
+        files={"file": ("screenshot.png", b"\x89PNG\r\n\x1a\nfakebytes", "image/png")},
+        data={"role": "supplement", "local": "false"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stored_path"].endswith(".png")
+    assert db.source_row(body["source_id"])["status"] == "running"

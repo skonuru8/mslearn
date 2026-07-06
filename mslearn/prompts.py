@@ -17,6 +17,18 @@ PROMPTS: dict[str, str] = {
         "\nYour previous attempt failed validation: {reasons}.\n"
         "Copy 'quote' EXACTLY from the chunk text — character for character."
     ),
+    "image_transcribe": (
+        "You convert one image into faithful study notes in Markdown.\n"
+        "Rules:\n"
+        "- Transcribe ALL readable text VERBATIM, in reading order, preserving "
+        "headings and lists. Include text inside nested screenshots, browser "
+        "windows, dialogs, or images-within-the-image.\n"
+        "- For non-text visual content (a diagram, chart, photo, UI layout), add "
+        "a bracketed description on its own line, e.g. "
+        "`[image: bar chart of revenue by quarter, Q4 highest]`.\n"
+        "- Do NOT invent facts, numbers, or labels that are not visibly present.\n"
+        "- Separate distinct blocks with a blank line. Output Markdown only.\n"
+    ),
     "concept_match": (
         "You decide whether candidate claims express the SAME underlying concept "
         "or practice as an anchor claim.\n"

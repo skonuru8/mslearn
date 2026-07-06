@@ -396,12 +396,12 @@ export function CorpusView() {
                 onFileChosen(event.dataTransfer.files?.[0] ?? null);
               }}
             >
-              <p>Drag and drop a PDF, EPUB, web page, or audio file here</p>
+              <p>Drag and drop a PDF, EPUB, web page, audio, or image here</p>
               <label className="browse-label">
                 Browse
                 <input
                   type="file"
-                  accept=".pdf,.epub,.html,.htm,.mp3,.m4a,.wav,.flac,.ogg"
+                  accept=".pdf,.epub,.html,.htm,.mp3,.m4a,.wav,.flac,.ogg,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic"
                   onChange={(event) => onFileChosen(event.target.files?.[0] ?? null)}
                 />
               </label>

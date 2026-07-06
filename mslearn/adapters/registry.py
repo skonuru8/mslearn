@@ -11,6 +11,8 @@ _SUFFIX_TYPES = {
     ".pdf": "pdf", ".epub": "epub",
     ".html": "blog", ".htm": "blog",
     ".mp3": "audio", ".m4a": "audio", ".wav": "audio", ".flac": "audio", ".ogg": "audio",
+    ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image",
+    ".gif": "image", ".bmp": "image", ".heic": "image",
 }
 
 
@@ -34,6 +36,7 @@ def load_source(
     source_type: str | None = None,
     role: str = "supplement",
     transcriber=None,
+    describe=None,
     **kwargs,
 ) -> SourceDocument:
     stype = source_type or detect_source_type(ref)
@@ -61,4 +64,16 @@ def load_source(
                 "(the worker builds one automatically; check whisper install/config)"
             )
         return load_audio(ref, transcriber, role)
+    if stype == "image":
+        from mslearn.adapters.image import load_image
+
+        # A multimodal model reads the image; the worker builds `describe`
+        # from the router's image role. Fail readably (not a bare error) when
+        # none is wired.
+        if describe is None:
+            raise ValueError(
+                f"cannot read image source {ref!r}: no image describer available "
+                "(the worker builds one automatically from the profile's image role)"
+            )
+        return load_image(ref, role, describe=describe)
     raise ValueError(f"unknown source type {stype!r}")

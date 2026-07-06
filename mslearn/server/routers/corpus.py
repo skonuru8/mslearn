@@ -81,7 +81,8 @@ def create_source(
 
 
 _UPLOAD_SUFFIXES = frozenset(
-    {".pdf", ".epub", ".html", ".htm", ".mp3", ".m4a", ".wav", ".flac", ".ogg"}
+    {".pdf", ".epub", ".html", ".htm", ".mp3", ".m4a", ".wav", ".flac", ".ogg",
+     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic"}
 )
 _MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB — a multi-GB upload must not fill the disk
 

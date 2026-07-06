@@ -4,6 +4,7 @@ import time
 
 from celery.exceptions import SoftTimeLimitExceeded
 
+from mslearn.adapters.image import image_describe_via_router
 from mslearn.adapters.registry import load_source
 from mslearn.chunking import chunk_source
 from mslearn.pipeline.contracts import to_claim_record
@@ -103,7 +104,9 @@ def chunk_source_task(
 
     try:
         doc = load_source(
-            ref, source_type=source_type, role=role, transcriber=ctx.transcriber
+            ref, source_type=source_type, role=role,
+            transcriber=ctx.transcriber,
+            describe=image_describe_via_router(ctx.router, ctx.db),
         )
     except SoftTimeLimitExceeded:
         if not _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
