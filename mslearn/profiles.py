@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from mslearn.opsdb import OpsDB
 
-ROLES = ("extraction", "synthesis", "interactive", "evals", "embedding")
+ROLES = ("extraction", "synthesis", "interactive", "evals", "embedding", "image")
 _ACTIVE_KEY = "active_profile"
 
 

@@ -203,3 +203,25 @@ def test_default_timeout_bounds_connect_and_pool_separately():
     assert timeout.read == 600.0
     assert timeout.write == 60.0
     assert timeout.pool == 60.0
+
+
+@respx.mock
+def test_image_message_becomes_content_array():
+    route = respx.post(URL).respond(json=ok_body("a red square"))
+    data_url = "data:image/png;base64,AAAABBBB"
+    request = ModelRequest(
+        messages=[ModelMessage(role="user", content="describe", images=[data_url])]
+    )
+    OpenRouterProvider("sk-test").complete("openai/gpt-4o-mini", request)
+    sent = json.loads(route.calls[0].request.content)
+    content = sent["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "describe"}
+    assert content[1] == {"type": "image_url", "image_url": {"url": data_url}}
+
+
+@respx.mock
+def test_text_only_message_stays_plain_string():
+    route = respx.post(URL).respond(json=ok_body("hi"))
+    OpenRouterProvider("sk-test").complete("m", req())
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["messages"][0]["content"] == "hi"

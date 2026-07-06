@@ -129,3 +129,28 @@ def test_bad_json_without_length_done_reason_keeps_generic_message():
     })
     with pytest.raises(ProviderBadOutputError, match="invalid JSON"):
         OllamaProvider(BASE).complete("m", req({"type": "object"}))
+
+
+@respx.mock
+def test_image_message_sends_raw_base64_images_field():
+    route = respx.post(f"{BASE}/api/chat").respond(json={
+        "message": {"content": "a chart"}, "prompt_eval_count": 1, "eval_count": 1,
+    })
+    request = ModelRequest(
+        messages=[ModelMessage(role="user", content="read", images=["data:image/png;base64,ZZZZ"])]
+    )
+    OllamaProvider(BASE).complete("qwen2.5vl", request)
+    sent = json.loads(route.calls[0].request.content)
+    msg = sent["messages"][0]
+    assert msg["content"] == "read"
+    assert msg["images"] == ["ZZZZ"]  # data-url prefix stripped
+
+
+@respx.mock
+def test_text_only_message_has_no_images_field():
+    route = respx.post(f"{BASE}/api/chat").respond(json={
+        "message": {"content": "x"}, "prompt_eval_count": 1, "eval_count": 1,
+    })
+    OllamaProvider(BASE).complete("m", req())
+    sent = json.loads(route.calls[0].request.content)
+    assert "images" not in sent["messages"][0]

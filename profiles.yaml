@@ -14,6 +14,12 @@ profiles:
       interactive: {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
       evals:       {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
       embedding:   {provider: ollama,     model: "nomic-embed-text"}
+      # Image reading. deepseek-v4-flash is TEXT-ONLY (probed 2026-07-06: adding
+      # an image part 404s; text works), so image ingestion goes to a genuinely
+      # multimodal model on the same OpenRouter key. gpt-4o-mini probed reading a
+      # text image correctly (~$0.0013/image) and handles dense/nested
+      # screenshots well. No reasoning param (not a reasoning model).
+      image:       {provider: openrouter, model: "openai/gpt-4o-mini"}
 
   claude-code:
     roles:
@@ -22,6 +28,9 @@ profiles:
       interactive: {provider: claude_code, model: "default"}
       evals:       {provider: claude_code, model: "default"}
       embedding:   {provider: ollama,      model: "nomic-embed-text"}
+      # Local vision model — requires `ollama pull qwen2.5vl:7b` before image
+      # ingestion works on this profile; falls back to a clear runtime error.
+      image:       {provider: ollama,      model: "qwen2.5vl:7b"}
 
   offline:
     roles:
@@ -30,3 +39,5 @@ profiles:
       interactive: {provider: ollama, model: "qwen3.5:9b"}
       evals:       {provider: ollama, model: "qwen3.5:9b"}
       embedding:   {provider: ollama, model: "nomic-embed-text"}
+      # Local vision model — requires `ollama pull qwen2.5vl:7b`.
+      image:       {provider: ollama, model: "qwen2.5vl:7b"}

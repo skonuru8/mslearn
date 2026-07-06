@@ -9,6 +9,11 @@ from typing import Any, Iterator
 class ModelMessage:
     role: str  # "system" | "user" | "assistant"
     content: str
+    # Optional image inputs, each a base64 data URL (e.g.
+    # "data:image/png;base64,..."). Text-only messages leave this None, so
+    # every existing caller and provider is unaffected. Providers that accept
+    # images (openrouter, ollama) render these; others ignore them.
+    images: list[str] | None = None
 
 
 @dataclass

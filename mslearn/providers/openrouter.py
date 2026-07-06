@@ -5,6 +5,7 @@ from typing import Iterator
 import httpx
 
 from mslearn.providers.base import (
+    ModelMessage,
     ModelProvider,
     ModelRequest,
     ModelResponse,
@@ -48,11 +49,23 @@ class OpenRouterProvider(ModelProvider):
             headers={"Authorization": f"Bearer {key}"},
         )
 
+    @staticmethod
+    def _message(m: ModelMessage) -> dict:
+        # Text-only messages keep the plain-string content form. A message
+        # carrying images becomes the OpenAI/OpenRouter multimodal content
+        # array: one text part plus one image_url part per image.
+        if not m.images:
+            return {"role": m.role, "content": m.content}
+        parts: list[dict] = [{"type": "text", "text": m.content}]
+        for data_url in m.images:
+            parts.append({"type": "image_url", "image_url": {"url": data_url}})
+        return {"role": m.role, "content": parts}
+
     def _body(self, model: str, request: ModelRequest, stream: bool) -> dict:
         body = {
             **request.params,
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": [self._message(m) for m in request.messages],
             "max_tokens": request.max_tokens,
             "stream": stream,
             "usage": {"include": True},

@@ -5,6 +5,7 @@ from typing import Iterator
 import httpx
 
 from mslearn.providers.base import (
+    ModelMessage,
     ModelProvider,
     ModelRequest,
     ModelResponse,
@@ -19,6 +20,20 @@ def _json(resp: httpx.Response) -> dict:
         return resp.json()
     except json.JSONDecodeError as exc:
         raise ProviderBadOutputError(f"invalid JSON from ollama: {resp.text[:200]!r}") from exc
+
+
+def _ollama_message(m: ModelMessage) -> dict:
+    msg = {"role": m.role, "content": m.content}
+    if m.images:
+        # Ollama's /api/chat wants raw base64 (no "data:...;base64," prefix).
+        msg["images"] = [_strip_data_url(img) for img in m.images]
+    return msg
+
+
+def _strip_data_url(data_url: str) -> str:
+    marker = "base64,"
+    idx = data_url.find(marker)
+    return data_url[idx + len(marker):] if idx != -1 else data_url
 
 
 class OllamaProvider(ModelProvider):
@@ -36,7 +51,7 @@ class OllamaProvider(ModelProvider):
         # below, not toggling thinking off.
         body = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": [_ollama_message(m) for m in request.messages],
             "stream": stream,
             "options": {"num_predict": request.max_tokens, **request.params},
         }
