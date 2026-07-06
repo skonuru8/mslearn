@@ -33,6 +33,13 @@ def create_export(
         else:
             paths = export_graph(ctx, out_dir / "graph", project_id)
         files[kind] = [path.as_posix() for path in paths]
+    # Portability guarantee (spec §3): every export run also dumps the full
+    # knowledge graph, regardless of the requested kinds. markdown/anki stay
+    # opt-in; the graph dump is unconditional (it's cheap and is what makes an
+    # export portable), so a caller can't opt out of it.
+    if "graph" not in files:
+        paths = export_graph(ctx, out_dir / "graph", project_id)
+        files["graph"] = [path.as_posix() for path in paths]
     return {"root": out_dir.as_posix(), "files": files}
 
 

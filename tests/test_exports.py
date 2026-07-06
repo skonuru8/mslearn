@@ -154,3 +154,22 @@ def test_exports_endpoint_writes_selected_kinds_under_timestamp(tmp_path, monkey
         for exported in paths:
             assert exported.startswith("data/exports/")
             assert Path(exported).exists()
+
+
+def test_exports_endpoint_always_dumps_graph_even_for_markdown_only(tmp_path, monkeypatch):
+    # Portability guarantee: the graph dump is unconditional — a caller asking
+    # for markdown only still gets GraphML + JSON.
+    ctx = make_export_ctx(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    app = create_app(context=ctx)
+
+    with TestClient(app) as client:
+        response = client.post("/api/exports", json={"kinds": ["markdown"]})
+
+    assert response.status_code == 200
+    files = response.json()["files"]
+    assert "graph" in files
+    graph_names = sorted(Path(p).name for p in files["graph"])
+    assert graph_names == ["graph.graphml", "graph.json"]
+    for exported in files["graph"]:
+        assert Path(exported).exists()
