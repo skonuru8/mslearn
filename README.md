@@ -96,6 +96,9 @@ reasoning; if it shared worker slots with extraction it would stall every
 other source's ingestion for the duration. Splitting the queues means adding
 a source while a synthesis run is in flight still extracts immediately.
 
+The first audio or caption-less-video ingest downloads a Whisper model;
+transcription is serialized (one at a time) to protect memory.
+
 > **Important:** `make serve` alone is not enough. Without both workers
 > running, uploaded sources sit in the queue forever and **Run synthesis does
 > nothing** — the button only *enqueues* a job; a worker is what executes it.

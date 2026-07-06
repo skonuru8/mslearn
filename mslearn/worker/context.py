@@ -63,8 +63,11 @@ def _build_transcriber(settings) -> object:
 
     Cheap: FasterWhisperTranscriber defers both the `faster_whisper` import
     and the model download/load to the first `.transcribe()` call, so a worker
-    that never ingests audio pays nothing.
+    that never ingests audio pays nothing. Wrapped in SerializingTranscriber so
+    two ingest slots (`--concurrency=2`) never load two whisper models at once
+    and blow the 18 GB memory budget.
     """
-    from mslearn.transcribe import FasterWhisperTranscriber
+    from mslearn.transcribe import FasterWhisperTranscriber, SerializingTranscriber
 
-    return FasterWhisperTranscriber(model_name=settings.whisper_model)
+    base = FasterWhisperTranscriber(model_name=settings.whisper_model)
+    return SerializingTranscriber(base, settings.data_dir / "whisper.lock")
