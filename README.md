@@ -24,10 +24,14 @@ Spec: `docs/superpowers/specs/2026-07-02-multi-source-learning-system-design.md`
    first). When two sources disagree, the conflict is kept and classified
    (outdated vs. genuine debate vs. context-dependent vs. evidence mismatch) —
    never silently merged.
-4. **You study.** Browse the curriculum, read generated teaching (every factual
-   sentence carries a `[claim:…]` citation you can click), take reasoning
-   quizzes graded with explanations, or just chat with your corpus. The app
-   remembers what confused you and adapts.
+4. **You study.** Browse the curriculum, read generated teaching — detailed
+   study notes that work through every trust-gated claim in the concept, not
+   a terse bullet summary, with a `[claim:…]` citation on every factual
+   sentence you can click — take reasoning quizzes graded with explanations,
+   or just chat with your corpus. The app remembers what confused you and
+   adapts. Notes are only as rich as the claims extracted from the source: a
+   sparse extraction (e.g. from a text-light image) yields thinner notes,
+   because depth comes only from what's trust-gated, never invented.
 5. **You export.** Markdown notes, Anki `.apkg` decks, and a full graph dump
    (GraphML + JSON) so your knowledge is never locked in.
 

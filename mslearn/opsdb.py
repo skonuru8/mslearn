@@ -147,6 +147,11 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "synth.max_tokens": 8192.0,
     "chat.max_tokens": 8192.0,
     "quiz.max_tokens": 8192.0,
+    # Plan 16 revised the teach_concept prompt for far more detailed notes
+    # (every supplied claim explained, not a one-line restatement). Left at
+    # 8192 rather than bumped: the terseness the plan fixed was prompt-driven,
+    # not budget-starved, and notes are bounded by the trust-gated claims
+    # supplied (typically well under this budget even written in full).
     "teach.max_tokens": 8192.0,
     "evolve.max_tokens": 8192.0,
     # Image transcription output can be long (a dense screenshot / slide with

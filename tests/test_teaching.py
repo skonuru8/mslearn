@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -204,3 +205,78 @@ def test_generate_teaching_excludes_rejected_claims(tmp_path):
     assert "[claim:c1]" in prompt
     assert "Rejected bogus fact" not in prompt
     assert "[claim:c2]" not in prompt
+
+
+def test_teach_concept_prompt_instructs_comprehensive_coverage_of_every_claim(tmp_path):
+    # Plan 16 Part C: notes must be a detailed treatment of every supplied
+    # claim, not a terse overview. This is prompt-driven (not a budget
+    # problem — teach.max_tokens is unchanged), so assert the instructions
+    # that make that happen are actually present in the built prompt.
+    router = TeachingRouter([good_markdown()])
+    ctx = make_ctx(tmp_path, router)
+    seed_concept(ctx.graph)
+
+    generate_teaching(ctx, "k1")
+
+    prompt = router.requests[0].messages[0].content
+    assert "cover EVERY supplied claim in" in prompt
+    assert "Every supplied claim id must be cited at least once" in prompt
+    assert "not a brief overview" in prompt
+
+
+class _EchoingRouter:
+    """Simulates a model that follows the teach_concept prompt's instruction
+    to cite every supplied claim id: it scrapes [claim:<id>] ids out of the
+    prompt's Claims section and echoes each one back under its own bullet."""
+
+    def __init__(self):
+        self.calls = []
+        self.requests = []
+
+    def complete(self, role, request):
+        self.calls.append(role)
+        self.requests.append(request)
+        prompt = request.messages[0].content
+        claims_section = prompt.split("Claims:\n", 1)[1].split("\nConflicts:", 1)[0]
+        claim_ids = re.findall(r"\[claim:([^\]\s]+)\]", claims_section)
+        body = "\n".join(f"- Detailed note on {cid}. [claim:{cid}]" for cid in claim_ids)
+        markdown = (
+            f"## Explanation\n{body}\n"
+            f"## Worked example\n{body}\n"
+            f"## Common misconception\n{body}\n"
+        )
+        return ModelResponse(
+            text=markdown, parsed=None, input_tokens=1, output_tokens=1,
+            latency_ms=1.0, provider="fake", model="m",
+        )
+
+
+def test_generate_teaching_cites_every_claim_id_for_a_multi_claim_concept(tmp_path):
+    router = _EchoingRouter()
+    ctx = make_ctx(tmp_path, router)
+    seed_concept(ctx.graph)
+    ctx.graph.add_claim(
+        "c2",
+        "TTLs bound staleness.",
+        "neutral",
+        "s2",
+        [0.0, 1.0],
+        quote="TTLs bound staleness",
+        chunk_id="ch2",
+    )
+    ctx.graph.assign_claim("c2", "k1")
+    ctx.graph.add_claim(
+        "c3",
+        "Write-through persists before cache update.",
+        "neutral",
+        "s3",
+        [0.5, 0.5],
+        quote="Write-through persists before cache update",
+        chunk_id="ch3",
+    )
+    ctx.graph.assign_claim("c3", "k1")
+
+    result = generate_teaching(ctx, "k1")
+
+    for claim_id in ("c1", "c2", "c3"):
+        assert f"[claim:{claim_id}]" in result
