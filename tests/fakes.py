@@ -187,6 +187,16 @@ class InMemoryGraphStore:
         if spine_seq is not None:
             self.spine_seq[claim_id] = int(spine_seq)
 
+    def upsert_claim(self, record, embedding, *, project_id: str = "default") -> None:
+        # Mirror the real GraphStore.upsert_claim: accept a ClaimRecord + its
+        # embedding (what extract_chunk_task commits) into the same dict shape
+        # add_claim uses, so the full ingest -> extract path can run offline.
+        self.add_claim(
+            record.claim_id, record.text, record.stance, record.source_id,
+            list(embedding), trust=record.trust, quote=record.quote,
+            chunk_id=record.chunk_id, project_id=project_id,
+        )
+
     def unassigned_trusted_claims(self, *, project_id: str = "default") -> list[dict]:
         rows = [
             {
@@ -198,7 +208,8 @@ class InMemoryGraphStore:
             }
             for c in self.claims.values()
             if c.get("project_id", "default") == project_id
-            and c["trust"] in {"trusted", "escalated"} and c["claim_id"] not in self.claim_to_concept
+            and c["trust"] in {"trusted", "escalated", "image_observed"}
+            and c["claim_id"] not in self.claim_to_concept
         ]
         return sorted(rows, key=lambda r: r["claim_id"])
 

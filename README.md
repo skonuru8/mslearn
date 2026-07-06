@@ -180,7 +180,16 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
 
 - **Adapters** (`mslearn/adapters/`): PDF (PyMuPDF), EPUB (ebooklib), blog
   (trafilatura), YouTube (youtube-transcript-api → yt-dlp+Whisper fallback),
-  audio (faster-whisper). All normalize to `SourceDocument` with locators.
+  audio (faster-whisper), and **images** (a multimodal model — `image` role in
+  `profiles.yaml`). All normalize to `SourceDocument` with locators.
+- **Images** (screenshots, slides, photos, diagrams — png/jpg/webp/gif/bmp/heic):
+  a multimodal model reads all visible text (including text inside nested
+  screenshots / browser windows) and describes non-text visuals; the result
+  flows through the normal claim → concept → notes pipeline. Image-derived
+  claims are labeled *from image* (an `image_observed` trust tier) because they
+  are model-read, not verbatim quotes from an authored text. The openrouter
+  profile uses `openai/gpt-4o-mini` for this; offline uses a local `qwen2.5vl`
+  (needs `ollama pull qwen2.5vl:7b`).
 - **Trust gate** (`mslearn/pipeline/trust.py`): rapidfuzz verbatim-quote check
   + embedding cosine sanity. Thresholds are audited tunables.
 - **Graph** (`mslearn/graph/store.py`): all Cypher lives here. Labels
