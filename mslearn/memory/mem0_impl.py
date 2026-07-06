@@ -33,6 +33,13 @@ class Mem0Memory:
         active = get_active_profile_name(self._db, profiles)
         interactive_model = profiles.profiles[active].roles["interactive"].model
         llm_model = self._db.get_setting("memory.llm_model", interactive_model) or interactive_model
+        # Embedder id from config, never code: prefer the active profile's
+        # `embedding` role so mem0 stays consistent with the rest of the system,
+        # with a `memory.embed_model` opsdb override mirroring memory.llm_model.
+        embedding_model = profiles.profiles[active].roles["embedding"].model
+        embed_model = (
+            self._db.get_setting("memory.embed_model", embedding_model) or embedding_model
+        )
 
         return {
             "graph_store": {
@@ -46,7 +53,7 @@ class Mem0Memory:
             "embedder": {
                 "provider": "ollama",
                 "config": {
-                    "model": "nomic-embed-text",
+                    "model": embed_model,
                     "ollama_base_url": self._settings.ollama_base_url,
                 },
             },

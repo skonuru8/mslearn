@@ -79,3 +79,34 @@ def test_mem0_config_points_llm_at_openrouter_not_openai(tmp_path):
     assert config["llm"]["config"]["openai_base_url"] == "https://openrouter.ai/api/v1"
     assert config["llm"]["config"]["api_key"] == "sk-or-test"
     assert "openrouter_base_url" not in config["llm"]["config"]
+
+
+def test_mem0_embedder_model_comes_from_active_profile(tmp_path):
+    # "model IDs live in config, never code": the embedder id must resolve from
+    # the active profile's embedding role, not a hardcode.
+    from mslearn.memory.mem0_impl import Mem0Memory
+    from mslearn.opsdb import OpsDB
+    from mslearn.profiles import get_active_profile_name, load_profiles
+    from mslearn.settings import Settings
+
+    settings = Settings(profiles_path=Path("profiles.yaml"))
+    db = OpsDB(tmp_path / "ops.db")
+    profiles = load_profiles(settings.profiles_path)
+    active = get_active_profile_name(db, profiles)
+    expected = profiles.profiles[active].roles["embedding"].model
+
+    config = Mem0Memory(settings, db)._build_config()
+    assert config["embedder"]["config"]["model"] == expected
+
+
+def test_mem0_embedder_model_honors_opsdb_override(tmp_path):
+    from mslearn.memory.mem0_impl import Mem0Memory
+    from mslearn.opsdb import OpsDB
+    from mslearn.settings import Settings
+
+    settings = Settings(profiles_path=Path("profiles.yaml"))
+    db = OpsDB(tmp_path / "ops.db")
+    db.set_setting("memory.embed_model", "custom-embed-model")
+
+    config = Mem0Memory(settings, db)._build_config()
+    assert config["embedder"]["config"]["model"] == "custom-embed-model"
