@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { ExportResponse, ProfileInfo, StatusResponse } from "../api/types";
 import { ErrorBanner } from "./Status";
@@ -139,6 +140,7 @@ export function AdminBar() {
         <button type="button" className="primary" disabled={busy} onClick={() => void onExport()}>
           Export all
         </button>
+        <Link to="/evals">Evals</Link>
         <a href="/api/admin/tunables" target="_blank" rel="noreferrer">
           Tunables API
         </a>

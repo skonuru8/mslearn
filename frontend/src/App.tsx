@@ -6,6 +6,7 @@ import { ChatView } from "./views/ChatView";
 import { ConceptView } from "./views/ConceptView";
 import { CorpusView } from "./views/CorpusView";
 import { CurriculumView } from "./views/CurriculumView";
+import { EvalsView } from "./views/EvalsView";
 import { MemoryView } from "./views/MemoryView";
 import { QuizView } from "./views/QuizView";
 import "./app.css";
@@ -30,6 +31,7 @@ function AppRoutes() {
       <Route path="/quiz" element={<QuizView />} />
       <Route path="/chat" element={<ChatView />} />
       <Route path="/memory" element={<MemoryView />} />
+      <Route path="/evals" element={<EvalsView />} />
     </Routes>
   );
 }

@@ -1,7 +1,16 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { AdminBar } from "./AdminBar";
+
+function renderAdminBar() {
+  return render(
+    <MemoryRouter>
+      <AdminBar />
+    </MemoryRouter>,
+  );
+}
 
 function statusResponse(
   overrides: Partial<{ worker: boolean; dead_letter_count: number }> = {},
@@ -37,7 +46,7 @@ describe("AdminBar", () => {
       });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminBar />);
+    renderAdminBar();
     await screen.findByDisplayValue("openrouter");
     await userEvent.selectOptions(screen.getByRole("combobox"), "offline");
 
@@ -60,7 +69,7 @@ describe("AdminBar", () => {
       .mockResolvedValueOnce(statusResponse({ worker: false }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminBar />);
+    renderAdminBar();
     await screen.findByText(/Worker offline/);
   });
 
@@ -74,7 +83,7 @@ describe("AdminBar", () => {
       .mockResolvedValueOnce(statusResponse({ dead_letter_count: 2 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminBar />);
+    renderAdminBar();
     await screen.findByText(/2 background jobs are stuck/);
   });
 
@@ -88,7 +97,7 @@ describe("AdminBar", () => {
       .mockResolvedValueOnce(statusResponse());
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminBar />);
+    renderAdminBar();
     await screen.findByText("Background worker running");
     expect(screen.queryByText(/stuck/)).toBeNull();
   });
@@ -110,7 +119,7 @@ describe("AdminBar", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     try {
-      render(<AdminBar />);
+      renderAdminBar();
       await vi.waitFor(() => {
         expect(fetchMock).toHaveBeenCalledWith("/api/status", expect.anything());
       });

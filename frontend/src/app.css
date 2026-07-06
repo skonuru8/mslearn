@@ -352,6 +352,38 @@ td {
   font-style: italic;
 }
 
+.eval-summary {
+  color: #374151;
+  margin-bottom: 1rem;
+}
+
+.eval-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.eval-table th,
+.eval-table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.eval-table th {
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.eval-pass {
+  color: #15803d;
+  font-weight: 600;
+}
+
+.eval-fail {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
 .concept-list {
   list-style: none;
   padding: 0;

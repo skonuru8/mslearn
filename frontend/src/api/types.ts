@@ -238,3 +238,23 @@ export interface FlagClaimResponse {
   concept_id: string;
   status: string;
 }
+
+export interface EvalRun {
+  id: number;
+  ts: number;
+  kind: string;
+  git_sha: string | null;
+  passed: number;
+}
+
+export interface EvalMetric {
+  metric: string;
+  value: number;
+  gate: number | null;
+  passed: number;
+}
+
+export interface EvalReport {
+  run: EvalRun | null;
+  metrics: EvalMetric[];
+}
