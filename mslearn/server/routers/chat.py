@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from fastapi import APIRouter, Depends
@@ -11,6 +12,8 @@ from mslearn.pipeline.qa import retrieve
 from mslearn.prompts import get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest, ProviderError
 from mslearn.server.deps import get_ctx, get_project_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -132,7 +135,13 @@ def _format_conflicts(conflicts: list[dict]) -> str:
 def _format_memory_hints(memory, question: str, project_id: str) -> str:
     if memory is None:
         return "(none - PERSONALIZATION ONLY)"
-    hits = memory.search(question, k=5, project_id=project_id)
+    # Memory is advisory/personalization-only (spec §3b): any failure here
+    # must degrade to "no personalization", never break chat.
+    try:
+        hits = memory.search(question, k=5, project_id=project_id)
+    except Exception:
+        logger.warning("learner memory search failed; continuing without personalization", exc_info=True)
+        return "(none - PERSONALIZATION ONLY)"
     if not hits:
         return "(none - PERSONALIZATION ONLY)"
     return "\n".join(f"- PERSONALIZATION ONLY: {_memory_text(item)}" for item in hits)
@@ -161,4 +170,9 @@ def _sse(payload: dict) -> str:
 def _record_interaction(memory, question: str, project_id: str) -> None:
     if memory is None:
         return
-    memory.add(f"asked about: {question[:160]}", "interaction", project_id=project_id)
+    # Memory is advisory/personalization-only (spec §3b): a write failure
+    # here must not break the chat response that already streamed.
+    try:
+        memory.add(f"asked about: {question[:160]}", "interaction", project_id=project_id)
+    except Exception:
+        logger.warning("learner memory write failed; continuing without it", exc_info=True)

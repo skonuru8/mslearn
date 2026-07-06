@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
+
 from mslearn.prompts import domain_guidance, get_domain_profile, get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest
+
+logger = logging.getLogger(__name__)
 
 _TRUSTED = frozenset({"trusted", "escalated", "image_observed"})
 
@@ -107,7 +111,13 @@ def _format_conflicts(conflicts: list[dict]) -> str:
 def _format_memory_hints(memory, concept_name: str, project_id: str = "default") -> str:
     if memory is None or not concept_name:
         return "(none)"
-    hits = memory.search(concept_name, k=5, project_id=project_id)
+    # Memory is advisory/personalization-only (spec §3b): any failure here
+    # must degrade to "no personalization", never break teaching.
+    try:
+        hits = memory.search(concept_name, k=5, project_id=project_id)
+    except Exception:
+        logger.warning("learner memory search failed; continuing without personalization", exc_info=True)
+        return "(none)"
     if not hits:
         return "(none)"
     return "\n".join(f"- PERSONALIZATION ONLY: {_memory_text(item)}" for item in hits)

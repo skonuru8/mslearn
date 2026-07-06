@@ -8,7 +8,7 @@ from mslearn.pipeline.teaching import TeachingError, generate_teaching
 from mslearn.providers.base import ModelResponse
 from mslearn.settings import Settings
 from mslearn.worker.context import PipelineContext
-from tests.fakes import InMemoryGraphStore, InMemoryLearnerMemory
+from tests.fakes import InMemoryGraphStore, InMemoryLearnerMemory, RaisingLearnerMemory
 
 
 class TeachingRouter:
@@ -163,6 +163,23 @@ def test_generate_teaching_includes_memory_hints_as_personalization_only(tmp_pat
     assert "PERSONALIZATION ONLY:" in prompt
     assert "learner likes database examples" in prompt
     assert router.requests[0].json_schema is None
+
+
+def test_generate_teaching_degrades_gracefully_when_memory_search_raises(tmp_path):
+    # Memory is advisory/personalization-only (spec §3b): a broken backend
+    # (e.g. mem0's undeclared `ollama` dependency EOFErroring) must not turn
+    # into a 500 — teaching proceeds with no personalization hints.
+    memory = RaisingLearnerMemory()
+    router = TeachingRouter([good_markdown()])
+    ctx = make_ctx(tmp_path, router, memory=memory)
+    seed_concept(ctx.graph)
+
+    result = generate_teaching(ctx, "k1")
+
+    assert result == good_markdown()
+    prompt = router.requests[0].messages[0].content
+    assert "Memory hints:\n(none)" in prompt
+    assert memory.calls == 1
 
 
 def test_generate_teaching_excludes_rejected_claims(tmp_path):

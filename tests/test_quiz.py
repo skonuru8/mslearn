@@ -12,7 +12,7 @@ from mslearn.providers.base import ModelResponse, ProviderBadOutputError
 from mslearn.server.app import create_app
 from mslearn.settings import Settings
 from mslearn.worker.context import PipelineContext
-from tests.fakes import InMemoryGraphStore, InMemoryLearnerMemory
+from tests.fakes import InMemoryGraphStore, InMemoryLearnerMemory, RaisingLearnerMemory
 
 
 class CapturingScriptedRouter:
@@ -322,3 +322,60 @@ def test_bad_quiz_judge_output_surfaces_as_502(tmp_path):
 
     assert response.status_code == 502
     assert "score_0_100 is required" in response.json()["detail"]
+
+
+def test_quiz_next_degrades_gracefully_when_memory_search_raises(tmp_path):
+    # Memory is advisory/personalization-only: a broken backend must not
+    # break quiz sequencing.
+    memory = RaisingLearnerMemory()
+    router = CapturingScriptedRouter(
+        [
+            {
+                "question": "Why does a TTL reduce stale-cache risk?",
+                "expected_points": ["TTL bounds how long stale cached data can survive [claim:c1]."],
+            }
+        ]
+    )
+    ctx = make_ctx(tmp_path, router, memory=memory)
+    ctx.db.record_quiz_result("k2", correct=False, score=35)
+
+    with make_client(ctx) as client:
+        response = client.get("/api/quiz/next", params={"session_id": "sess-1"})
+
+    assert response.status_code == 200
+    assert memory.calls == 1
+
+
+def test_quiz_answer_degrades_gracefully_when_memory_write_raises(tmp_path):
+    memory = RaisingLearnerMemory()
+    router = CapturingScriptedRouter(
+        [
+            {
+                "correct": False,
+                "score_0_100": 40,
+                "explanation": "Missed the TTL stale-data bound [claim:c1].",
+            }
+        ]
+    )
+    ctx = make_ctx(tmp_path, router, memory=memory)
+    ctx.db.set_setting(
+        "quiz:pending:sess-1:k1",
+        json.dumps(
+            {
+                "question": "Why does a TTL reduce stale-cache risk?",
+                "expected_points": [
+                    "TTL bounds how long stale cached data can survive [claim:c1]."
+                ],
+            }
+        ),
+    )
+
+    with make_client(ctx) as client:
+        response = client.post(
+            "/api/quiz/answer",
+            json={"concept_id": "k1", "answer": "my answer", "session_id": "sess-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["correct"] is False
+    assert memory.calls == 1

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from mslearn.prompts import get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest, ProviderBadOutputError
+
+logger = logging.getLogger(__name__)
 
 _TRUSTED = frozenset({"trusted", "escalated", "image_observed"})
 
@@ -199,13 +202,24 @@ def _record_struggle(memory, concept: dict, pending: dict, project_id: str = "de
         return
     expected_points = pending.get("expected_points")
     missed = str(expected_points[0]) if expected_points else "expected reasoning point"
-    memory.add(f"struggled with {concept.get('name', '')}: {missed}", "struggle", project_id=project_id)
+    # Memory is advisory/personalization-only (spec §3b): a write failure
+    # here must not break grading, which already succeeded.
+    try:
+        memory.add(f"struggled with {concept.get('name', '')}: {missed}", "struggle", project_id=project_id)
+    except Exception:
+        logger.warning("learner memory write failed; continuing without it", exc_info=True)
 
 
 def _struggle_text(memory, project_id: str = "default") -> str:
     if memory is None:
         return ""
-    hits = memory.search("struggles", k=20, project_id=project_id)
+    # Memory is advisory/personalization-only (spec §3b): any failure here
+    # must degrade to "no personalization", never break quiz sequencing.
+    try:
+        hits = memory.search("struggles", k=20, project_id=project_id)
+    except Exception:
+        logger.warning("learner memory search failed; continuing without personalization", exc_info=True)
+        return ""
     return "\n".join(_memory_text(item) for item in hits).lower()
 
 

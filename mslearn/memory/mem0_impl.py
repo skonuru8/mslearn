@@ -19,13 +19,22 @@ class Mem0Memory:
         self._settings = settings
         self._db = db
         self._client: Any | None = None
+        # Set on first failed client build/call. Once broken, mem0's client
+        # build is expensive (and, for the undeclared `ollama` pip package,
+        # interactive — it can EOFError trying to prompt for install) so we
+        # short-circuit to a no-op instead of re-attempting it every request.
+        self._disabled = False
 
     def _ensure_client(self) -> Any:
         if self._client is not None:
             return self._client
-        from mem0 import Memory  # noqa: PLC0415 — lazy import gate
+        try:
+            from mem0 import Memory  # noqa: PLC0415 — lazy import gate
 
-        self._client = Memory.from_config(self._build_config())
+            self._client = Memory.from_config(self._build_config())
+        except Exception:
+            self._disabled = True
+            raise
         return self._client
 
     def _build_config(self) -> dict[str, Any]:
@@ -88,40 +97,64 @@ class Mem0Memory:
         )
 
     def add(self, text: str, category: str, project_id: str = "default") -> str:
-        result = self._ensure_client().add(
-            text,
-            user_id=f"learner:{project_id}",
-            metadata={"category": category},
-        )
-        rows = result.get("results") if isinstance(result, dict) else result
-        if isinstance(rows, dict):
-            rows = rows.get("results", [])
-        if not rows:
-            raise RuntimeError("mem0 add returned no results")
-        first = rows[0] if isinstance(rows, list) else rows
-        if isinstance(first, dict):
-            return str(first.get("id", ""))
-        return str(first)
+        if self._disabled:
+            return ""
+        try:
+            result = self._ensure_client().add(
+                text,
+                user_id=f"learner:{project_id}",
+                metadata={"category": category},
+            )
+            rows = result.get("results") if isinstance(result, dict) else result
+            if isinstance(rows, dict):
+                rows = rows.get("results", [])
+            if not rows:
+                raise RuntimeError("mem0 add returned no results")
+            first = rows[0] if isinstance(rows, list) else rows
+            if isinstance(first, dict):
+                return str(first.get("id", ""))
+            return str(first)
+        except Exception:
+            self._disabled = True
+            raise
 
     def search(self, query: str, k: int = 5, project_id: str = "default") -> list[MemoryItem]:
-        result = self._ensure_client().search(
-            query,
-            top_k=k,
-            filters={"user_id": f"learner:{project_id}"},
-        )
-        rows = result.get("results", []) if isinstance(result, dict) else result
-        return [self._to_item(row) for row in rows]
+        if self._disabled:
+            return []
+        try:
+            result = self._ensure_client().search(
+                query,
+                top_k=k,
+                filters={"user_id": f"learner:{project_id}"},
+            )
+            rows = result.get("results", []) if isinstance(result, dict) else result
+            return [self._to_item(row) for row in rows]
+        except Exception:
+            self._disabled = True
+            raise
 
     def all(self, project_id: str = "default") -> list[MemoryItem]:
-        result = self._ensure_client().get_all(
-            filters={"user_id": f"learner:{project_id}"},
-            top_k=1000,
-        )
-        rows = result.get("results", []) if isinstance(result, dict) else result
-        return [self._to_item(row) for row in rows]
+        if self._disabled:
+            return []
+        try:
+            result = self._ensure_client().get_all(
+                filters={"user_id": f"learner:{project_id}"},
+                top_k=1000,
+            )
+            rows = result.get("results", []) if isinstance(result, dict) else result
+            return [self._to_item(row) for row in rows]
+        except Exception:
+            self._disabled = True
+            raise
 
     def delete(self, memory_id: str) -> None:
-        self._ensure_client().delete(memory_id)
+        if self._disabled:
+            return
+        try:
+            self._ensure_client().delete(memory_id)
+        except Exception:
+            self._disabled = True
+            raise
 
 
 def _parse_created_at(value: Any) -> float:

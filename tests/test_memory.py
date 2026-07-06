@@ -99,6 +99,37 @@ def test_mem0_embedder_model_comes_from_active_profile(tmp_path):
     assert config["embedder"]["config"]["model"] == expected
 
 
+def test_mem0_disables_after_first_client_build_failure(tmp_path):
+    # mem0 builds its client lazily on first .search()/.add() (the undeclared
+    # `ollama` pip package + interactive input() prompt bug). Once that build
+    # fails, subsequent calls must short-circuit to empty/no-op instead of
+    # re-attempting the same broken (and here, expensive-to-detect) build.
+    from mslearn.memory.mem0_impl import Mem0Memory
+    from mslearn.opsdb import OpsDB
+    from mslearn.settings import Settings
+
+    settings = Settings(profiles_path=Path("profiles.yaml"))
+    db = OpsDB(tmp_path / "ops.db")
+    memory = Mem0Memory(settings, db)
+
+    def _boom():
+        raise RuntimeError("ollama not installed")
+
+    memory._ensure_client = _boom  # noqa: SLF001 — simulate the lazy client build failing
+
+    import pytest
+
+    with pytest.raises(RuntimeError):
+        memory.search("anything")
+    assert memory._disabled is True
+
+    # Second call short-circuits: no attempt to rebuild, no exception.
+    assert memory.search("anything") == []
+    assert memory.add("text", "interaction") == ""
+    assert memory.all() == []
+    memory.delete("some-id")  # no-op, must not raise
+
+
 def test_mem0_embedder_model_honors_opsdb_override(tmp_path):
     from mslearn.memory.mem0_impl import Mem0Memory
     from mslearn.opsdb import OpsDB

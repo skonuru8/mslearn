@@ -613,6 +613,32 @@ class InMemoryLearnerMemory:
         self._project_ids.pop(memory_id, None)
 
 
+class RaisingLearnerMemory:
+    """Stands in for a broken memory backend (unreachable embedder, mem0's
+    interactive-input EOFError, etc.). Every `search`/`add` call raises, so
+    tests can confirm teach/quiz/chat degrade to "no personalization" and
+    still return 200 instead of a 500 (Plan 16 Part A)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def add(self, text: str, category: str, project_id: str = "default") -> str:
+        self.calls += 1
+        raise RuntimeError("memory backend unavailable")
+
+    def search(self, query: str, k: int = 5, project_id: str = "default") -> list[MemoryItem]:
+        self.calls += 1
+        raise RuntimeError("memory backend unavailable")
+
+    def all(self, project_id: str = "default") -> list[MemoryItem]:
+        self.calls += 1
+        raise RuntimeError("memory backend unavailable")
+
+    def delete(self, memory_id: str) -> None:
+        self.calls += 1
+        raise RuntimeError("memory backend unavailable")
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))

@@ -10,7 +10,7 @@ from mslearn.opsdb import OpsDB
 from mslearn.server.app import create_app
 from mslearn.settings import Settings
 from mslearn.worker.context import PipelineContext
-from tests.fakes import InMemoryGraphStore, InMemoryLearnerMemory, ScriptedRouter
+from tests.fakes import InMemoryGraphStore, InMemoryLearnerMemory, RaisingLearnerMemory, ScriptedRouter
 
 
 def make_chat_ctx(tmp_path, router, *, memory=None):
@@ -209,6 +209,34 @@ def test_chat_sessions_are_project_scoped(tmp_path):
     assert [t["question"] for t in other_history.json()["turns"]] == [
         "other project question"
     ]
+
+
+def test_chat_degrades_gracefully_when_memory_is_broken(tmp_path):
+    # Memory is advisory/personalization-only (spec §3b): a broken backend
+    # (e.g. mem0's undeclared `ollama` dependency EOFErroring) must not turn
+    # into a 500 — this is the exact live bug Plan 16 fixes.
+    memory = RaisingLearnerMemory()
+    router = ScriptedRouter(
+        embeddings=[[1.0, 0.0]],
+        stream_chunks=["A TTL bounds staleness [claim:c1]."],
+    )
+    ctx = make_chat_ctx(tmp_path, router, memory=memory)
+    app = create_app(context=ctx)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/chat",
+            json={"question": "How should I choose a cache TTL?", "session_id": "s-broken"},
+        )
+
+    assert response.status_code == 200
+    payloads = sse_payloads(response.text)
+    assert {"delta": "A TTL bounds staleness [claim:c1]."} in payloads
+    assert any(p.get("done") for p in payloads)
+    prompt = "\n".join(message.content for message in router.requests[0].messages)
+    assert "(none - PERSONALIZATION ONLY)" in prompt
+    # One failed search (prompt build) + one failed add (post-stream record).
+    assert memory.calls == 2
 
 
 def test_mid_stream_provider_error_emits_error_frame(tmp_path):
