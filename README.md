@@ -168,11 +168,17 @@ Golden sets live in `evals/golden/*.jsonl` (rows with review status
 `approved`/`corrected` only; seed + review via the UI eval pages).
 
 ```bash
-.venv/bin/python -m mslearn.evals.run --offline     # CI-safe metric run
-.venv/bin/python -m mslearn.evals.run               # + judged provenance
+make eval                                           # CI-safe metric run (offline)
+.venv/bin/python -m mslearn.evals.run --offline     # same, explicit
+.venv/bin/python -m mslearn.evals.run               # + judged provenance (live backend)
 .venv/bin/python -m mslearn.evals.evolve_cli --once # eval-gated self-evolution
 bash scripts/release_check.sh                       # full release harness
 ```
+
+> Always run these with the **project venv** (`.venv/bin/python …` or `make
+> eval`). A bare `python -m mslearn.evals.run` uses your system interpreter,
+> which lacks `langgraph`/deps and fails with `ModuleNotFoundError: No module
+> named 'langgraph'`.
 
 Release gates (spec §6): extraction P/R ≥ 0.90/0.85, grounding false-accept
 ≤ 2%, clustering F1 ≥ 0.80, tension accuracy ≥ 0.75, schema validity ≥ 0.99,
