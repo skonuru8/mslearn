@@ -6,7 +6,7 @@ from typing import Any
 from mslearn.prompts import get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest, ProviderBadOutputError
 
-_TRUSTED = frozenset({"trusted", "escalated"})
+_TRUSTED = frozenset({"trusted", "escalated", "image_observed"})
 
 _QUESTION_SCHEMA = {
     "type": "object",

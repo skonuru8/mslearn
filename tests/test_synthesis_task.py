@@ -27,6 +27,9 @@ class FakeGraph:
     def upsert_claim(self, claim_record, embedding, *, project_id="default"):
         self.claims[claim_record.claim_id] = (claim_record, embedding)
 
+    def source_type_of(self, source_id, *, project_id="default"):
+        return None
+
 
 @pytest.fixture(autouse=True)
 def eager_app():

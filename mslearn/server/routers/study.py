@@ -33,7 +33,7 @@ def concept(concept_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get
     claims = [
         c
         for c in ctx.graph.claims_in_concept(concept_id, project_id=project_id)
-        if c.get("trust", "trusted") in {"trusted", "escalated"}
+        if c.get("trust", "trusted") in {"trusted", "escalated", "image_observed"}
     ]
     return {
         "concept": concept_row,

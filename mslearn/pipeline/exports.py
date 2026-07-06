@@ -144,7 +144,7 @@ def _claims(graph, concept_id: str, project_id: str = "default") -> list[dict]:
     return [
         claim
         for claim in graph.claims_in_concept(concept_id, project_id=project_id)
-        if claim.get("trust", "trusted") in {"trusted", "escalated"}
+        if claim.get("trust", "trusted") in {"trusted", "escalated", "image_observed"}
     ]
 
 

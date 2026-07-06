@@ -3,7 +3,7 @@ from __future__ import annotations
 from mslearn.prompts import domain_guidance, get_domain_profile, get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest
 
-_TRUSTED = frozenset({"trusted", "escalated"})
+_TRUSTED = frozenset({"trusted", "escalated", "image_observed"})
 
 
 class TeachingError(Exception):

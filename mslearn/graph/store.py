@@ -184,6 +184,15 @@ class GraphStore:
         )
         return rows[0] if rows else None
 
+    def source_type_of(self, source_id: str, *, project_id: str = "default") -> str | None:
+        rows = self.run_read(
+            "MATCH (s:Source {source_id: $source_id, project_id: $project_id}) "
+            "RETURN s.source_type AS source_type",
+            source_id=source_id,
+            project_id=project_id,
+        )
+        return rows[0]["source_type"] if rows else None
+
     def sample_chunks(self, limit: int = 50, *, project_id: str = "default") -> list[dict]:
         return self.run_read(
             "MATCH (c:Chunk {project_id: $project_id})<-[:HAS_CHUNK]-(s:Source {project_id: $project_id}) "
@@ -455,7 +464,7 @@ class GraphStore:
     def unassigned_trusted_claims(self, *, project_id: str = "default") -> list[dict]:
         return self.run_read(
             "MATCH (c:Claim {project_id: $project_id}) "
-            "WHERE c.trust IN ['trusted', 'escalated'] "
+            "WHERE c.trust IN ['trusted', 'escalated', 'image_observed'] "
             "AND NOT (c)-[:IN_CONCEPT]->(:Concept {project_id: $project_id}) "
             "RETURN c.claim_id AS claim_id, c.text AS text, c.stance AS stance, "
             "c.source_id AS source_id, c.embedding AS embedding "

@@ -22,7 +22,7 @@ class ClaimRecord:
     text: str
     stance: str  # "recommends" | "warns_against" | "neutral"
     quote: str
-    trust: str   # "trusted" | "escalated" | "rejected"
+    trust: str   # "trusted" | "escalated" | "image_observed" | "rejected"
 
 
 @dataclass(frozen=True)

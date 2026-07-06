@@ -41,7 +41,7 @@ def cluster_new_claims(ctx, project_id: str = "default") -> set[str]:
             for h in hits
             if h["claim_id"] != anchor_id
             and h["score"] >= similarity_floor
-            and h.get("trust") in {"trusted", "escalated"}
+            and h.get("trust") in {"trusted", "escalated", "image_observed"}
         ]
         if not candidates:
             concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id], project_id=project_id)

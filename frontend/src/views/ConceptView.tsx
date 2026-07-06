@@ -108,6 +108,11 @@ export function ConceptView() {
         <div key={claim.claim_id} className="claim-row">
           <span>
             [{claim.claim_id}] {claim.text}
+            {claim.trust === "image_observed" ? (
+              <span className="badge image-badge" title="Read from an image by a vision model, not a verbatim text quote">
+                {" "}from image
+              </span>
+            ) : null}
           </span>
           <button type="button" onClick={() => void onFlag(claim.claim_id)}>
             Flag

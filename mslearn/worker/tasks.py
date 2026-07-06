@@ -284,6 +284,11 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
         return
 
     trust = "escalated" if state["escalated"] else "trusted"
+    if ctx.graph.source_type_of(chunk["source_id"], project_id=project_id) == "image":
+        # Image claims are model-read from pixels, not verbatim quotes from an
+        # authored text. Still trust-gated (the quote must match the
+        # transcription), but tiered so provenance stays visible.
+        trust = "image_observed"
     accepted = state["accepted"]
     try:
         if accepted:

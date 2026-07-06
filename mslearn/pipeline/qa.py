@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-TRUSTED_FOR_QA = frozenset({"trusted", "escalated"})
+TRUSTED_FOR_QA = frozenset({"trusted", "escalated", "image_observed"})
 
 
 def retrieve(ctx, question: str, k: int = 8, project_id: str = "default") -> dict:

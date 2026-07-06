@@ -103,6 +103,12 @@ class InMemoryGraphStore:
             return None
         return {k: v for k, v in row.items() if k != "embedding"}
 
+    def source_type_of(self, source_id: str, *, project_id: str = "default") -> str | None:
+        row = self.sources.get(source_id)
+        if row is None or row.get("project_id", "default") != project_id:
+            return None
+        return row.get("source_type")
+
     def delete_source(self, source_id: str, *, project_id: str = "default") -> list[str]:
         doomed_claims = [
             cid

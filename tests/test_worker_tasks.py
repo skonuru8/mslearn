@@ -13,15 +13,19 @@ from tests.test_extraction_graph import BAD, GOOD, CHUNK, ScriptedRouter
 
 
 class FakeGraph:
-    def __init__(self, chunks):
+    def __init__(self, chunks, source_types=None):
         self.chunks = chunks
         self.claims = {}
+        self.source_types = source_types or {}
 
     def get_chunk(self, chunk_id, *, project_id="default"):
         return self.chunks.get(chunk_id)
 
     def upsert_claim(self, claim, embedding, *, project_id="default"):
         self.claims[claim.claim_id] = (claim, embedding)
+
+    def source_type_of(self, source_id, *, project_id="default"):
+        return self.source_types.get(source_id)
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +57,20 @@ def test_successful_chunk_commits_claims(ctx):
     claim, embedding = context.graph.claims[cid]
     assert claim.trust == "trusted" and claim.source_id == "s1"
     assert context.db.source_row("s1")["done_chunks"] == 1
+
+
+def test_image_source_claims_get_image_observed_tier(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = FakeGraph(
+        {"s1:0": {"chunk_id": "s1:0", "source_id": "s1", "text": CHUNK}},
+        source_types={"s1": "image"},
+    )
+    db.register_source("s1", ref="shot.png", role="spine", total_chunks=1)
+    db.register_chunk_jobs("s1", ["s1:0"])
+    set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([GOOD]), graph=graph))
+    worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
+    (claim, _), = graph.claims.values()
+    assert claim.trust == "image_observed"
 
 
 def test_escalated_claims_marked(ctx):
