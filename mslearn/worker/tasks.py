@@ -102,7 +102,9 @@ def chunk_source_task(
     entry_ts = row["ts"]
 
     try:
-        doc = load_source(ref, source_type=source_type, role=role)
+        doc = load_source(
+            ref, source_type=source_type, role=role, transcriber=ctx.transcriber
+        )
     except SoftTimeLimitExceeded:
         if not _source_prep_stale(ctx.db, source_id, project_id, entry_ts):
             ctx.db.set_source_status(

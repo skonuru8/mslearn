@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
     claude_binary: str = "claude"
+    # Whisper model for audio / caption-less-video transcription. "small" +
+    # int8 keeps the resident footprint modest (~0.5 GB) so it can coexist
+    # with Ollama on an 18 GB machine; transcription is serialized (see
+    # SerializingTranscriber) so two ingest slots never load two at once.
+    whisper_model: str = "small"
 
     @property
     def ops_db(self) -> Path:

@@ -29,7 +29,12 @@ def detect_source_type(ref: str) -> str:
 
 
 def load_source(
-    ref: str, *, source_type: str | None = None, role: str = "supplement", **kwargs
+    ref: str,
+    *,
+    source_type: str | None = None,
+    role: str = "supplement",
+    transcriber=None,
+    **kwargs,
 ) -> SourceDocument:
     stype = source_type or detect_source_type(ref)
     if stype == "pdf":
@@ -41,9 +46,19 @@ def load_source(
     if stype == "youtube":
         from mslearn.adapters.youtube import load_youtube  # keeps yt deps lazy
 
-        return load_youtube(ref, role, **kwargs)
+        # A transcriber is only needed when captions are missing; pass it
+        # through so load_youtube can fall back, and let it raise its own
+        # clear TranscriptUnavailable if captions fail and none was provided.
+        return load_youtube(ref, role, transcriber=transcriber, **kwargs)
     if stype == "audio":
         from mslearn.adapters.audio import load_audio
 
-        return load_audio(ref, kwargs["transcriber"], role)
+        # Audio always needs a transcriber. Fail with a readable message
+        # instead of a bare KeyError when the worker/CLI has none wired.
+        if transcriber is None:
+            raise ValueError(
+                f"cannot transcribe audio source {ref!r}: no transcriber available "
+                "(the worker builds one automatically; check whisper install/config)"
+            )
+        return load_audio(ref, transcriber, role)
     raise ValueError(f"unknown source type {stype!r}")

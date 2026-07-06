@@ -13,6 +13,13 @@ class PipelineContext:
     router: object
     graph: object
     memory: object | None = None
+    # Shared whisper transcriber for audio / caption-less-video ingest. A
+    # Transcriber wraps a faster_whisper model and is NOT serializable, so it
+    # can't ride through Celery task args — it lives here and is constructed
+    # once per worker process. Construction is cheap (the heavy faster_whisper
+    # import + model load is deferred to the first .transcribe()); tests that
+    # never touch audio can leave it None.
+    transcriber: object | None = None
 
 
 def set_context(context: PipelineContext) -> None:
@@ -44,4 +51,20 @@ def build_default_context() -> PipelineContext:
         memory = Mem0Memory(settings, db)
     except Exception as exc:
         logger.warning("learner memory disabled: %s", exc)
-    return PipelineContext(settings=settings, db=db, router=router, graph=graph, memory=memory)
+    transcriber = _build_transcriber(settings)
+    return PipelineContext(
+        settings=settings, db=db, router=router, graph=graph,
+        memory=memory, transcriber=transcriber,
+    )
+
+
+def _build_transcriber(settings) -> object:
+    """Construct the shared whisper transcriber for this worker process.
+
+    Cheap: FasterWhisperTranscriber defers both the `faster_whisper` import
+    and the model download/load to the first `.transcribe()` call, so a worker
+    that never ingests audio pays nothing.
+    """
+    from mslearn.transcribe import FasterWhisperTranscriber
+
+    return FasterWhisperTranscriber(model_name=settings.whisper_model)
