@@ -204,5 +204,8 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
   (`data/ops.db`, WAL).
 - **Providers** (`mslearn/providers/`): Ollama / OpenRouter / Claude Code
   behind one `ModelProvider` interface; every call logged to `model_calls`.
-- **Memory** (`mslearn/memory/`): mem0 on the same Neo4j, personalization
-  only — an eval gate asserts no generated fact originates from memory.
+- **Memory** (`mslearn/memory/`): in-house SQLite-backed learner memory
+  (`sqlite_memory.py`), embedded via the app's own `ModelRouter.embed` path,
+  personalization only — an eval gate asserts no generated fact originates
+  from memory. Any memory failure degrades to no personalization; it can
+  never break an interactive endpoint.

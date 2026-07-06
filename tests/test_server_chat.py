@@ -213,7 +213,7 @@ def test_chat_sessions_are_project_scoped(tmp_path):
 
 def test_chat_degrades_gracefully_when_memory_is_broken(tmp_path):
     # Memory is advisory/personalization-only (spec §3b): a broken backend
-    # (e.g. mem0's undeclared `ollama` dependency EOFErroring) must not turn
+    # (e.g. an unreachable embedder) must not turn
     # into a 500 — this is the exact live bug Plan 16 fixes.
     memory = RaisingLearnerMemory()
     router = ScriptedRouter(

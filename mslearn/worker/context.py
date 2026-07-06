@@ -46,9 +46,9 @@ def build_default_context() -> PipelineContext:
     graph = GraphStore(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
     memory = None
     try:
-        from mslearn.memory.mem0_impl import Mem0Memory
+        from mslearn.memory.sqlite_memory import SqliteMemory
 
-        memory = Mem0Memory(settings, db)
+        memory = SqliteMemory(db, router)
     except Exception as exc:
         logger.warning("learner memory disabled: %s", exc)
     transcriber = _build_transcriber(settings)

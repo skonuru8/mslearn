@@ -98,6 +98,16 @@ CREATE TABLE IF NOT EXISTS chat_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_turns_session
     ON chat_turns (project_id, session_id, id);
+CREATE TABLE IF NOT EXISTS learner_memory (
+    memory_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    text TEXT NOT NULL,
+    embedding TEXT NOT NULL,
+    created_ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_learner_memory_project
+    ON learner_memory (project_id, created_ts);
 """
 
 DEFAULT_PROJECT_ID = "default"
@@ -769,6 +779,38 @@ class OpsDB:
                 (project_id, session_id, limit),
             ).fetchall()
         return [dict(r) for r in reversed(rows)]
+
+    def add_memory_item(
+        self,
+        *,
+        memory_id: str,
+        project_id: str,
+        category: str,
+        text: str,
+        embedding_json: str,
+        created_ts: float,
+    ) -> None:
+        """Persist one learner-memory row (SqliteMemory backend, Plan 16)."""
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO learner_memory"
+                " (memory_id, project_id, category, text, embedding, created_ts)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (memory_id, project_id, category, text, embedding_json, created_ts),
+            )
+
+    def memory_items(self, project_id: str = DEFAULT_PROJECT_ID) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT memory_id, category, text, embedding, created_ts FROM learner_memory"
+                " WHERE project_id = ? ORDER BY created_ts",
+                (project_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_memory_item(self, memory_id: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute("DELETE FROM learner_memory WHERE memory_id = ?", (memory_id,))
 
 
 def _quiz_aggregate(concept_id: str, rows: list[dict]) -> dict:

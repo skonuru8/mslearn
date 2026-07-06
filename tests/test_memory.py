@@ -1,8 +1,9 @@
-import sys
-from pathlib import Path
+import pytest
 
 from mslearn.memory.base import LearnerMemory, MemoryItem
-from tests.fakes import InMemoryLearnerMemory
+from mslearn.memory.sqlite_memory import SqliteMemory
+from mslearn.opsdb import OpsDB
+from tests.fakes import InMemoryLearnerMemory, ScriptedRouter
 
 
 def test_in_memory_learner_memory_protocol():
@@ -26,13 +27,10 @@ def test_in_memory_learner_memory_protocol():
     assert mem.search("short") == []
 
 
-def test_mem0_import_is_lazy():
-    import mslearn.memory.mem0_impl  # noqa: F401
-
-    assert "mem0" not in sys.modules
-
-
-def test_build_default_context_memory_none_when_mem0_missing(monkeypatch, tmp_path):
+def test_build_default_context_memory_none_when_sqlite_memory_missing(monkeypatch, tmp_path):
+    # build_default_context keeps its try/except: even if constructing the
+    # in-house memory itself somehow fails, memory=None must not take down
+    # worker startup.
     from mslearn.settings import Settings
     from mslearn.worker.context import build_default_context
 
@@ -48,96 +46,133 @@ def test_build_default_context_memory_none_when_mem0_missing(monkeypatch, tmp_pa
     )
 
     def _raise_import(*_args, **_kwargs):
-        raise ImportError("mem0 not installed")
+        raise RuntimeError("memory backend construction failed")
 
-    monkeypatch.setattr("mslearn.memory.mem0_impl.Mem0Memory", _raise_import)
+    monkeypatch.setattr("mslearn.memory.sqlite_memory.SqliteMemory", _raise_import)
 
     ctx = build_default_context()
     assert ctx.memory is None
 
 
-def test_mem0_config_points_llm_at_openrouter_not_openai(tmp_path):
-    # mem0's OpenAILLM only honors `openrouter_base_url` when the
-    # OPENROUTER_API_KEY *environment variable* is set (it isn't — we pass
-    # the key through config, not the env). Without this, the "openai"
-    # provider silently falls back to https://api.openai.com/v1 and every
-    # learner-memory call fails auth using an OpenRouter key against
-    # OpenAI's real API. `openai_base_url` is the field that actually
-    # takes effect for that fallback path.
-    from mslearn.memory.mem0_impl import Mem0Memory
-    from mslearn.opsdb import OpsDB
-    from mslearn.settings import Settings
-
-    settings = Settings(
-        profiles_path=Path("profiles.yaml"),
-        openrouter_api_key="sk-or-test",
+def test_sqlite_memory_add_search_ranks_by_cosine_similarity(tmp_path):
+    router = ScriptedRouter(
+        embeddings=[
+            [1.0, 0.0],  # add: "prefers short examples"
+            [0.0, 1.0],  # add: "struggled with recursion"
+            [1.0, 0.0],  # search query: close to the first item
+        ]
     )
     db = OpsDB(tmp_path / "ops.db")
-    config = Mem0Memory(settings, db)._build_config()
+    mem = SqliteMemory(db, router)
 
-    assert config["llm"]["provider"] == "openai"
-    assert config["llm"]["config"]["openai_base_url"] == "https://openrouter.ai/api/v1"
-    assert config["llm"]["config"]["api_key"] == "sk-or-test"
-    assert "openrouter_base_url" not in config["llm"]["config"]
+    mid = mem.add("prefers short examples", "preference")
+    mem.add("struggled with recursion", "struggle")
+
+    hits = mem.search("short examples please", k=5)
+
+    assert len(hits) == 2
+    assert hits[0].memory_id == mid
+    assert hits[0].text == "prefers short examples"
+    assert hits[0].category == "preference"
+    assert isinstance(hits[0], MemoryItem)
 
 
-def test_mem0_embedder_model_comes_from_active_profile(tmp_path):
-    # "model IDs live in config, never code": the embedder id must resolve from
-    # the active profile's embedding role, not a hardcode.
-    from mslearn.memory.mem0_impl import Mem0Memory
-    from mslearn.opsdb import OpsDB
-    from mslearn.profiles import get_active_profile_name, load_profiles
-    from mslearn.settings import Settings
-
-    settings = Settings(profiles_path=Path("profiles.yaml"))
+def test_sqlite_memory_search_respects_k(tmp_path):
+    router = ScriptedRouter(embeddings=[[1.0, 0.0]] * 4)
     db = OpsDB(tmp_path / "ops.db")
-    profiles = load_profiles(settings.profiles_path)
-    active = get_active_profile_name(db, profiles)
-    expected = profiles.profiles[active].roles["embedding"].model
+    mem = SqliteMemory(db, router)
+    mem.add("one", "interaction")
+    mem.add("two", "interaction")
+    mem.add("three", "interaction")
 
-    config = Mem0Memory(settings, db)._build_config()
-    assert config["embedder"]["config"]["model"] == expected
+    hits = mem.search("query", k=2)
+
+    assert len(hits) == 2
 
 
-def test_mem0_disables_after_first_client_build_failure(tmp_path):
-    # mem0 builds its client lazily on first .search()/.add() (the undeclared
-    # `ollama` pip package + interactive input() prompt bug). Once that build
-    # fails, subsequent calls must short-circuit to empty/no-op instead of
-    # re-attempting the same broken (and here, expensive-to-detect) build.
-    from mslearn.memory.mem0_impl import Mem0Memory
-    from mslearn.opsdb import OpsDB
-    from mslearn.settings import Settings
-
-    settings = Settings(profiles_path=Path("profiles.yaml"))
+def test_sqlite_memory_is_project_scoped(tmp_path):
+    router = ScriptedRouter(embeddings=[[1.0, 0.0]] * 4)
     db = OpsDB(tmp_path / "ops.db")
-    memory = Mem0Memory(settings, db)
+    mem = SqliteMemory(db, router)
+    mem.add("default project note", "interaction", project_id="default")
+    mem.add("other project note", "interaction", project_id="other")
 
-    def _boom():
-        raise RuntimeError("ollama not installed")
+    default_items = mem.all(project_id="default")
+    other_items = mem.all(project_id="other")
 
-    memory._ensure_client = _boom  # noqa: SLF001 — simulate the lazy client build failing
+    assert [item.text for item in default_items] == ["default project note"]
+    assert [item.text for item in other_items] == ["other project note"]
+    default_hits = mem.search("note", k=5, project_id="default")
+    assert [item.text for item in default_hits] == ["default project note"]
 
-    import pytest
+
+def test_sqlite_memory_all_and_delete(tmp_path):
+    router = ScriptedRouter(embeddings=[[1.0, 0.0], [0.0, 1.0]])
+    db = OpsDB(tmp_path / "ops.db")
+    mem = SqliteMemory(db, router)
+    first = mem.add("first note", "interaction")
+    mem.add("second note", "interaction")
+
+    assert len(mem.all()) == 2
+    mem.delete(first)
+    remaining = mem.all()
+    assert len(remaining) == 1
+    assert remaining[0].text == "second note"
+
+
+def test_sqlite_memory_disables_after_embedding_failure(tmp_path):
+    # An embedding-backend outage (e.g. Ollama unreachable) must not surface
+    # as a broken teach/quiz/chat endpoint, and must not keep re-attempting
+    # the same failing embed call on every request.
+    class ExplodingRouter:
+        def embed(self, texts):
+            raise RuntimeError("embedder unreachable")
+
+    db = OpsDB(tmp_path / "ops.db")
+    mem = SqliteMemory(db, ExplodingRouter())
 
     with pytest.raises(RuntimeError):
-        memory.search("anything")
-    assert memory._disabled is True
+        mem.add("some text", "interaction")
+    assert mem._disabled is True
 
-    # Second call short-circuits: no attempt to rebuild, no exception.
-    assert memory.search("anything") == []
-    assert memory.add("text", "interaction") == ""
-    assert memory.all() == []
-    memory.delete("some-id")  # no-op, must not raise
+    # Short-circuits: no further attempt to embed, no exception.
+    assert mem.add("more text", "interaction") == ""
+    assert mem.search("anything") == []
 
 
-def test_mem0_embedder_model_honors_opsdb_override(tmp_path):
-    from mslearn.memory.mem0_impl import Mem0Memory
-    from mslearn.opsdb import OpsDB
-    from mslearn.settings import Settings
+def test_sqlite_memory_search_disables_after_embedding_failure(tmp_path):
+    class ExplodingAfterFirstAdd:
+        def __init__(self):
+            self.calls = 0
 
-    settings = Settings(profiles_path=Path("profiles.yaml"))
+        def embed(self, texts):
+            self.calls += 1
+            if self.calls == 1:
+                return [[1.0, 0.0] for _ in texts]
+            raise RuntimeError("embedder unreachable")
+
     db = OpsDB(tmp_path / "ops.db")
-    db.set_setting("memory.embed_model", "custom-embed-model")
+    router = ExplodingAfterFirstAdd()
+    mem = SqliteMemory(db, router)
+    mem.add("some text", "interaction")
 
-    config = Mem0Memory(settings, db)._build_config()
-    assert config["embedder"]["config"]["model"] == "custom-embed-model"
+    with pytest.raises(RuntimeError):
+        mem.search("query")
+    assert mem._disabled is True
+    assert mem.search("query") == []
+
+
+def test_sqlite_memory_survives_opsdb_restart(tmp_path):
+    # learner_memory rows live in OpsDB (sqlite), not a process-local dict —
+    # a fresh OpsDB handle on the same file must still see them.
+    router = ScriptedRouter(embeddings=[[1.0, 0.0]])
+    db_path = tmp_path / "ops.db"
+    db = OpsDB(db_path)
+    mem = SqliteMemory(db, router)
+    mem.add("persisted note", "interaction")
+
+    restarted_db = OpsDB(db_path)
+    restarted_mem = SqliteMemory(restarted_db, ScriptedRouter(embeddings=[[1.0, 0.0]]))
+    items = restarted_mem.all()
+    assert len(items) == 1
+    assert items[0].text == "persisted note"

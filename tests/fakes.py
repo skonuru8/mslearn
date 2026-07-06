@@ -614,8 +614,8 @@ class InMemoryLearnerMemory:
 
 
 class RaisingLearnerMemory:
-    """Stands in for a broken memory backend (unreachable embedder, mem0's
-    interactive-input EOFError, etc.). Every `search`/`add` call raises, so
+    """Stands in for a broken memory backend (unreachable embedder, a
+    downed sqlite file, etc.). Every `search`/`add` call raises, so
     tests can confirm teach/quiz/chat degrade to "no personalization" and
     still return 200 instead of a 500 (Plan 16 Part A)."""
 

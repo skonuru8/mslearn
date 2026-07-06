@@ -65,16 +65,16 @@ def test_memory_endpoint_returns_503_when_memory_unavailable(tmp_path):
 
 
 class BrokenMemory:
-    """mem0 builds its client lazily on first real call — a bad config or an
-    unreachable neo4j/ollama/openrouter surfaces here, not when ctx.memory
-    is constructed. The memory endpoints must turn that into the same
-    honest 503 the UI already handles, not an unhandled 500."""
+    """A backend can fail on real use (e.g. an unreachable embedder) rather
+    than at ctx.memory construction time. The memory endpoints must turn
+    that into the same honest 503 the UI already handles, not an unhandled
+    500."""
 
     def all(self, project_id: str = "default"):
-        raise RuntimeError("neo4j connection refused")
+        raise RuntimeError("embedder connection refused")
 
     def delete(self, memory_id: str) -> None:
-        raise RuntimeError("neo4j connection refused")
+        raise RuntimeError("embedder connection refused")
 
 
 def test_memory_endpoint_returns_503_with_reason_when_client_init_fails(tmp_path):
@@ -85,9 +85,9 @@ def test_memory_endpoint_returns_503_with_reason_when_client_init_fails(tmp_path
         delete_response = client.delete("/api/memory/missing")
 
     assert list_response.status_code == 503
-    assert "neo4j connection refused" in list_response.json()["detail"]
+    assert "embedder connection refused" in list_response.json()["detail"]
     assert delete_response.status_code == 503
-    assert "neo4j connection refused" in delete_response.json()["detail"]
+    assert "embedder connection refused" in delete_response.json()["detail"]
 
 
 def test_static_dist_absent_does_not_shadow_api(tmp_path, monkeypatch):

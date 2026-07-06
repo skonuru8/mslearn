@@ -37,9 +37,8 @@ def _memory_or_503(ctx):
 
 
 def _unavailable(exc: Exception) -> HTTPException:
-    # Mem0Memory builds and validates its client lazily, on first real use
-    # (see memory/mem0_impl.py) — a bad config or unreachable
-    # neo4j/ollama/openrouter surfaces here, not at ctx.memory construction
+    # SqliteMemory (memory/sqlite_memory.py) can still fail on real use — an
+    # unreachable embedder surfaces here, not at ctx.memory construction
     # time. Without this, that raised as an unhandled 500 instead of the
     # same honest "memory unavailable" the UI already knows how to show.
     return HTTPException(status_code=503, detail=f"learner memory unavailable: {exc}"[:500])

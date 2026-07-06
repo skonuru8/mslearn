@@ -167,7 +167,7 @@ def test_generate_teaching_includes_memory_hints_as_personalization_only(tmp_pat
 
 def test_generate_teaching_degrades_gracefully_when_memory_search_raises(tmp_path):
     # Memory is advisory/personalization-only (spec §3b): a broken backend
-    # (e.g. mem0's undeclared `ollama` dependency EOFErroring) must not turn
+    # (e.g. an unreachable embedder) must not turn
     # into a 500 — teaching proceeds with no personalization hints.
     memory = RaisingLearnerMemory()
     router = TeachingRouter([good_markdown()])
