@@ -2,6 +2,7 @@
 import pytest
 
 from mslearn.opsdb import OpsDB
+from mslearn.pipeline.extraction_graph import build_extraction_graph
 from mslearn.pipeline.orchestrator import ingest_source
 from mslearn.worker import tasks as worker_tasks
 from mslearn.worker.app import app
@@ -22,8 +23,10 @@ def test_image_source_ingests_to_image_observed_claims(tmp_path, monkeypatch):
     graph = InMemoryGraphStore()
     # Enough scripted responses for extraction AND the eager synthesis pass
     # (clustering/naming) that fires when the source completes.
+    router = ScriptedRouter([GOOD] * 8)
     ctx = PipelineContext(
-        settings=None, db=db, router=ScriptedRouter([GOOD] * 8), graph=graph
+        settings=None, db=db, router=router, graph=graph,
+        extraction_graph=build_extraction_graph(router, db),
     )
     set_context(ctx)
 

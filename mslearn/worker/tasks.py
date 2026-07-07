@@ -253,7 +253,7 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
         return
 
     try:
-        state = run_extraction(ctx.router, ctx.db, chunk_id, chunk["text"])
+        state = run_extraction(ctx.extraction_graph, chunk_id, chunk["text"])
     except SoftTimeLimitExceeded:
         _finalize_chunk(
             ctx, project_id, source_id, chunk_id, "failed",

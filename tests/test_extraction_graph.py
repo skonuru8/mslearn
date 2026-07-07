@@ -1,5 +1,5 @@
 from mslearn.opsdb import OpsDB
-from mslearn.pipeline.extraction_graph import run_extraction
+from mslearn.pipeline.extraction_graph import build_extraction_graph, run_extraction
 from mslearn.prompts import get_prompt
 from mslearn.providers.base import ModelResponse, ProviderBadOutputError, ProviderError
 
@@ -36,7 +36,7 @@ def db(tmp_path):
 
 def test_clean_pass_single_attempt(tmp_path):
     router = ScriptedRouter([GOOD])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert [d.text for d in state["accepted"]] == ["Cache invalidation is hard."]
     assert state["rejected"] == [] and state["error"] is None
     assert router.calls == ["extraction"]
@@ -44,28 +44,28 @@ def test_clean_pass_single_attempt(tmp_path):
 
 def test_retry_then_pass(tmp_path):
     router = ScriptedRouter([BAD, GOOD])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert len(state["accepted"]) == 1
     assert router.calls == ["extraction", "extraction"]
 
 
 def test_escalation_after_exhausted_retries(tmp_path):
     router = ScriptedRouter([BAD, BAD, GOOD])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert len(state["accepted"]) == 1 and state["escalated"] is True
     assert router.calls == ["extraction", "extraction", "synthesis"]
 
 
 def test_escalated_failure_ends_with_rejects(tmp_path):
     router = ScriptedRouter([BAD, BAD, BAD, BAD])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert state["accepted"] == [] and len(state["rejected"]) == 1
     assert state["escalated"] is True
 
 
 def test_provider_error_sets_error(tmp_path):
     router = ScriptedRouter([ProviderError("down")])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert state["error"] == "down" and state["accepted"] == []
 
 
@@ -74,7 +74,7 @@ def test_bad_output_retries_then_passes(tmp_path):
     # finish_reason=length) must not fail the chunk permanently — it gets a
     # retry within extract.max_attempts, same as a parse failure.
     router = ScriptedRouter([ProviderBadOutputError("invalid JSON from openrouter"), GOOD])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert len(state["accepted"]) == 1
     assert state["error"] is None
     assert router.calls == ["extraction", "extraction"]
@@ -82,7 +82,7 @@ def test_bad_output_retries_then_passes(tmp_path):
 
 def test_bad_output_exhausted_escalates_with_rejects(tmp_path):
     router = ScriptedRouter([ProviderBadOutputError("bad")] * 4)
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert state["escalated"] is True
     assert state["accepted"] == []
     assert state["error"] is None
@@ -90,13 +90,13 @@ def test_bad_output_exhausted_escalates_with_rejects(tmp_path):
 
 def test_empty_claims_is_valid_end(tmp_path):
     router = ScriptedRouter([{"claims": []}])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert state["accepted"] == [] and state["rejected"] == [] and state["error"] is None
 
 
 def test_parse_error_retry_then_pass(tmp_path):
     router = ScriptedRouter([MALFORMED, GOOD])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert len(state["accepted"]) == 1
     assert [d.text for d in state["accepted"]] == ["Cache invalidation is hard."]
     assert router.calls == ["extraction", "extraction"]
@@ -104,7 +104,7 @@ def test_parse_error_retry_then_pass(tmp_path):
 
 def test_parse_error_exhausted_escalates_with_rejects(tmp_path):
     router = ScriptedRouter([MALFORMED, MALFORMED, MALFORMED, MALFORMED])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert state["escalated"] is True
     assert state["accepted"] == []
     assert len(state["rejected"]) >= 1
@@ -126,7 +126,7 @@ def test_accepted_claims_not_duplicated_across_retries(tmp_path):
          "quote": "Cache invalidation is one of the two hard problems"},
     ]}
     router = ScriptedRouter([one_good_one_bad, retry_repeats_the_good_one])
-    state = run_extraction(router, db(tmp_path), "c1", CHUNK)
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert [d.text for d in state["accepted"]] == ["Cache invalidation is hard."]
     assert state["rejected"] == []
     assert router.calls == ["extraction", "extraction"]
@@ -145,13 +145,34 @@ def test_extraction_request_uses_max_tokens_tunable(tmp_path):
     router = RecordingRouter([GOOD])
     d = db(tmp_path)
     d.set_tunable("extract.max_tokens", 4096.0, "test")
-    run_extraction(router, d, "c1", CHUNK)
+    run_extraction(build_extraction_graph(router, d), "c1", CHUNK)
     assert router.requests[0].max_tokens == 4096
 
 
 def test_extraction_prompt_mentions_kind(tmp_path):
     p = get_prompt(db(tmp_path), "extraction")
     assert "kind" in p and "mechanism" in p and "caveat" in p
+
+
+def test_run_extraction_reuses_prebuilt_graph(tmp_path, monkeypatch):
+    # run_extraction takes a prebuilt graph and must NOT rebuild it internally
+    # — building recompiles the StateGraph and re-reads every tunable, which
+    # extract_chunk_task previously paid on every single chunk.
+    import mslearn.pipeline.extraction_graph as eg
+
+    calls = {"n": 0}
+    orig = eg.build_extraction_graph
+
+    def counting(router, db):
+        calls["n"] += 1
+        return orig(router, db)
+
+    monkeypatch.setattr(eg, "build_extraction_graph", counting)
+    router = ScriptedRouter([GOOD, GOOD])
+    graph = eg.build_extraction_graph(router, db(tmp_path))
+    eg.run_extraction(graph, "s:1", CHUNK)
+    eg.run_extraction(graph, "s:2", CHUNK)
+    assert calls["n"] == 1  # built once, not per chunk
 
 
 def test_extraction_prompt_injects_max_claims_tunable(tmp_path):
@@ -167,7 +188,7 @@ def test_extraction_prompt_injects_max_claims_tunable(tmp_path):
     router = RecordingRouter([GOOD])
     d = db(tmp_path)
     d.set_tunable("extract.max_claims", 5.0, "test")
-    run_extraction(router, d, "c1", CHUNK)
+    run_extraction(build_extraction_graph(router, d), "c1", CHUNK)
     prompt_text = router.requests[0].messages[0].content
     assert "at most 5 claims" in prompt_text
     assert "{max_claims}" not in prompt_text

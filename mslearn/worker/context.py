@@ -20,6 +20,13 @@ class PipelineContext:
     # import + model load is deferred to the first .transcribe()); tests that
     # never touch audio can leave it None.
     transcriber: object | None = None
+    # Compiled LangGraph extraction graph, built once per worker process
+    # instead of once per chunk (build_extraction_graph re-reads every
+    # extraction/trust tunable and recompiles the StateGraph — real overhead
+    # at chunk volume). None is a valid value for tests/callers that never
+    # touch extract_chunk_task; build_default_context always populates it, and
+    # a worker restart re-reads the tunables.
+    extraction_graph: object | None = None
 
 
 def set_context(context: PipelineContext) -> None:
@@ -36,6 +43,7 @@ def get_context() -> PipelineContext:
 def build_default_context() -> PipelineContext:
     from mslearn.graph.store import GraphStore
     from mslearn.opsdb import OpsDB
+    from mslearn.pipeline.extraction_graph import build_extraction_graph
     from mslearn.profiles import load_profiles
     from mslearn.providers.router import ModelRouter
     from mslearn.settings import get_settings
@@ -52,9 +60,12 @@ def build_default_context() -> PipelineContext:
     except Exception as exc:
         logger.warning("learner memory disabled: %s", exc)
     transcriber = _build_transcriber(settings)
+    # Built once here, at worker-process init, not per chunk — see
+    # extraction_graph field docstring above.
+    extraction_graph = build_extraction_graph(router, db)
     return PipelineContext(
         settings=settings, db=db, router=router, graph=graph,
-        memory=memory, transcriber=transcriber,
+        memory=memory, transcriber=transcriber, extraction_graph=extraction_graph,
     )
 
 

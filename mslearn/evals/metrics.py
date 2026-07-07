@@ -6,7 +6,7 @@ from rapidfuzz import fuzz
 
 from mslearn.evals.golden import load_golden
 from mslearn.pipeline.contracts import ClaimDraft
-from mslearn.pipeline.extraction_graph import run_extraction
+from mslearn.pipeline.extraction_graph import build_extraction_graph, run_extraction
 from mslearn.pipeline.synthesis import classify_conflict_pair, concept_match_claim_ids
 from mslearn.pipeline.trust import check_claim
 
@@ -19,8 +19,12 @@ def extraction_pr(ctx) -> dict[str, float]:
     if not rows:
         return {"precision": 0.0, "recall": 0.0}
     tp = fp = fn = 0
+    # Built once for the whole golden set, not per row — mirrors the worker's
+    # per-process cache (see worker/context.py); the graph structure and its
+    # tunables don't change between rows.
+    graph = build_extraction_graph(ctx.router, ctx.db)
     for index, row in enumerate(rows):
-        state = run_extraction(ctx.router, ctx.db, f"eval-{index}", row.chunk_text)
+        state = run_extraction(graph, f"eval-{index}", row.chunk_text)
         predicted = [
             {"text": draft.text, "stance": draft.stance}
             for draft in state["accepted"]

@@ -126,8 +126,11 @@ def build_extraction_graph(router, db: OpsDB):
     return builder.compile()
 
 
-def run_extraction(router, db: OpsDB, chunk_id: str, chunk_text: str) -> ExtractionState:
-    graph = build_extraction_graph(router, db)
+def run_extraction(graph, chunk_id: str, chunk_text: str) -> ExtractionState:
+    """Run extraction on a chunk through a graph built once per worker
+    process (see worker/context.py's `extraction_graph`) — recompiling the
+    StateGraph and re-reading every tunable on each chunk was pure per-chunk
+    overhead the graph structure and tunables don't need."""
     initial: ExtractionState = {
         "chunk_id": chunk_id, "chunk_text": chunk_text, "attempt": 0,
         "escalated": False, "drafts": [], "accepted": [], "rejected": [],

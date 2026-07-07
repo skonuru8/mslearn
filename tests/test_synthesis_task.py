@@ -5,6 +5,7 @@ import pytest
 from mslearn.chunking import chunk_source
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
+from mslearn.pipeline.extraction_graph import build_extraction_graph
 from mslearn.pipeline.synthesis import build_curriculum, cluster_new_claims, process_dirty_concepts
 from mslearn.worker import tasks as worker_tasks
 from mslearn.worker.app import app
@@ -50,7 +51,10 @@ def test_trigger_runs_once_when_source_completes(tmp_path, monkeypatch):
         }
     )
     router = ScriptedRouter([GOOD, GOOD])
-    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+    set_context(PipelineContext(
+        settings=None, db=db, router=router, graph=graph,
+        extraction_graph=build_extraction_graph(router, db),
+    ))
 
     class Trigger:
         def __init__(self):
@@ -83,7 +87,10 @@ def test_all_failed_source_never_triggers_synthesis(tmp_path, monkeypatch):
         }
     )
     router = ScriptedRouter([ProviderError("bad"), ProviderError("bad")])
-    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+    set_context(PipelineContext(
+        settings=None, db=db, router=router, graph=graph,
+        extraction_graph=build_extraction_graph(router, db),
+    ))
 
     class Trigger:
         def __init__(self):
