@@ -18,6 +18,7 @@ def test_defaults_registry_exact():
         "chat.max_tokens": 8192.0,
         "quiz.max_tokens": 8192.0,
         "teach.max_tokens": 8192.0,
+        "guide.max_tokens": 8192.0,
         "evolve.max_tokens": 8192.0,
         "image.max_tokens": 4096.0,
     }

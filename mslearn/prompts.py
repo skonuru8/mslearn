@@ -164,6 +164,25 @@ PROMPTS: dict[str, str] = {
         "Claims:\n{claims}\n"
         "Return JSON: unsupported_fact (bool), offending_sentence (string)."
     ),
+    "guide": (
+        "You organize a concept's already-extracted claims into a study guide.\n"
+        "{domain_guidance}\n"
+        "Concept: {concept_name}\nSummary: {concept_summary}\n"
+        "Claims (each is a verbatim-grounded fact you must NOT reword):\n{claims}\n"
+        "Memory hints:\n{memory_hints}\n"
+        "Return JSON only matching the schema. Rules:\n"
+        "- Group the claims into 2-6 sections; 'skeleton' lists the section titles"
+        " in order. Give each section a short id (s1,s2,...).\n"
+        "- Each section item copies one claim: set 'text' to the claim's text"
+        " VERBATIM, 'kind' to the claim's kind, and 'claims' to [that claim_id].\n"
+        "- Every claim id supplied must appear in exactly one item. Never invent"
+        " items, text, or claim ids. Items with no claim id are forbidden.\n"
+        "- 'tl_dr.text' is one plain sentence naming what the concept is; cite the"
+        " 1-2 claim ids it rests on in tl_dr.claims.\n"
+        "- 'open_questions' may list what the source did NOT cover (gaps only), or"
+        " be empty. It is the only field not tied to a claim; never put facts there.\n"
+        "- Memory hints personalize ordering only; never a source of facts.\n"
+    ),
     "evolve_propose": (
         "Propose up to 3 tunable or prompt changes to improve eval metrics.\n"
         "Current metrics:\n{metrics}\n"

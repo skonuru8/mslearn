@@ -428,6 +428,7 @@ class GraphStore:
             "(a)-[:IN_CONCEPT]->(k:Concept {concept_id: $concept_id, project_id: $project_id}), "
             "(b)-[:IN_CONCEPT]->(k) "
             "RETURN a.claim_id AS claim_a, b.claim_id AS claim_b, "
+            "a.text AS text_a, b.text AS text_b, "
             "r.classification AS classification, r.rationale AS rationale",
             concept_id=concept_id,
             project_id=project_id,

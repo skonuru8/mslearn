@@ -320,7 +320,11 @@ class InMemoryGraphStore:
     def conflicts_in_concept(self, concept_id: str, *, project_id: str = "default") -> list[dict]:
         members = {r["claim_id"] for r in self.claims_in_concept(concept_id, project_id=project_id)}
         rows = [
-            dict(v)
+            {
+                **v,
+                "text_a": self.claims.get(v["claim_a"], {}).get("text", ""),
+                "text_b": self.claims.get(v["claim_b"], {}).get("text", ""),
+            }
             for v in self.conflicts.values()
             if v["claim_a"] in members and v["claim_b"] in members
         ]
