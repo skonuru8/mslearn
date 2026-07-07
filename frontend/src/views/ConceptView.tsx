@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { Link, useParams } from "react-router-dom";
+import { api, ApiError } from "../api/client";
 import type { ConceptDetail, TeachResponse } from "../api/types";
 import { MarkdownWithCitations } from "../components/MarkdownWithCitations";
 import { ErrorBanner, Loading } from "../components/Status";
@@ -13,6 +13,7 @@ export function ConceptView() {
   const [cached, setCached] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notInProject, setNotInProject] = useState(false);
 
   const load = useCallback(async (force = false) => {
     setLoading(true);
@@ -31,8 +32,14 @@ export function ConceptView() {
       setMarkdown(teach.markdown);
       setCached(Boolean(teach.cached));
       setError(null);
+      setNotInProject(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load concept");
+      if (err instanceof ApiError && err.status === 404) {
+        setNotInProject(true);
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to load concept");
+      }
     } finally {
       setLoading(false);
     }
@@ -42,6 +49,7 @@ export function ConceptView() {
     setDetail(null);
     setMarkdown("");
     setCached(false);
+    setNotInProject(false);
     void load();
   }, [load]);
 
@@ -65,6 +73,15 @@ export function ConceptView() {
   if (!detail) {
     if (loading) {
       return <Loading label="Writing your lesson… (first time can take a minute or two)" />;
+    }
+    if (notInProject) {
+      return (
+        <section className="panel">
+          <h1>Topic not in this project</h1>
+          <p>This topic is not part of this project.</p>
+          <Link to="/curriculum">Go to this project’s course</Link>
+        </section>
+      );
     }
     return (
       <section className="panel">

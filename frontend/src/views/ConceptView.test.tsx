@@ -62,4 +62,25 @@ describe("ConceptView", () => {
       );
     });
   });
+
+  it("shows a neutral 'not in this project' panel on 404, not an error", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      json: async () => ({ detail: "unknown concept 'x'" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/concepts/x"]}>
+        <Routes>
+          <Route path="/concepts/:id" element={<ConceptView />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/not part of this project/i)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
