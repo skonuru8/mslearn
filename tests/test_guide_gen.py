@@ -81,6 +81,11 @@ def test_generate_guide_drops_uncited_and_adds_disagreements(fake_ctx):
     assert out["disagreements"][0]["classification"] in {
         "context_dependent", "outdated", "genuine_debate", "evidence_mismatch",
     }
+    disagreement = out["disagreements"][0]
+    assert disagreement["a"]["label"] == "Position A"
+    assert disagreement["b"]["label"] == "Position B"
+    assert "c3" not in disagreement["a"]["label"]
+    assert "c4" not in disagreement["b"]["label"]
 
 
 def test_generate_guide_memory_failure_degrades(fake_ctx_raising_memory):

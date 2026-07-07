@@ -201,6 +201,7 @@ def test_concept_endpoint_returns_meta_claims_conflicts_and_citations(study_clie
     assert body["conflicts"] == []
     assert body["citations"][0]["claim_id"] == "c1"
     assert body["citations"][0]["page"] == 12
+    assert body["citations"][0]["quote"] == "Cache invalidation is one of the two hard problems"
 
 
 def test_teach_returns_guide_and_progress(study_client):

@@ -382,6 +382,7 @@ class InMemoryGraphStore:
             rows.append(
                 {
                     "claim_id": claim_id,
+                    "quote": claim.get("quote"),
                     "chunk_id": chunk.get("chunk_id"),
                     "source_id": chunk.get("source_id"),
                     "seq": chunk.get("seq"),

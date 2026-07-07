@@ -18,8 +18,8 @@ def _disagreements(graph, concept_id, project_id):
         out.append({
             "summary": r.get("rationale", ""),
             "classification": r.get("classification", ""),
-            "a": {"label": f"claim {r.get('claim_a','')}", "text": r.get("text_a", ""), "claims": [r.get("claim_a","")]},
-            "b": {"label": f"claim {r.get('claim_b','')}", "text": r.get("text_b", ""), "claims": [r.get("claim_b","")]},
+            "a": {"label": "Position A", "text": r.get("text_a", ""), "claims": [r.get("claim_a","")]},
+            "b": {"label": "Position B", "text": r.get("text_b", ""), "claims": [r.get("claim_b","")]},
         })
     return out
 

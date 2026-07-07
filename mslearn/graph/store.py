@@ -516,7 +516,7 @@ class GraphStore:
         return self.run_read(
             "MATCH (c:Claim {project_id: $project_id})-[:EXTRACTED_FROM]->(ch:Chunk {project_id: $project_id}) "
             "WHERE c.claim_id IN $claim_ids "
-            "RETURN c.claim_id AS claim_id, ch.chunk_id AS chunk_id, "
+            "RETURN c.claim_id AS claim_id, c.quote AS quote, ch.chunk_id AS chunk_id, "
             "ch.source_id AS source_id, ch.seq AS seq, ch.unit_index AS unit_index, "
             "ch.kind AS kind, ch.page AS page, ch.href AS href, ch.url AS url, "
             "ch.para_index AS para_index, ch.start_s AS start_s, ch.end_s AS end_s "

@@ -68,6 +68,36 @@ describe("InteractiveGuide", () => {
     expect(screen.getByText(/genuine debate/i)).toBeInTheDocument();
   });
 
+  it("never renders a raw claim-id-shaped label in the disagreement section", () => {
+    const guide = baseGuide({
+      disagreements: [
+        {
+          summary: "Sources disagree on stability.",
+          classification: "genuine_debate",
+          a: {
+            label: "Position A",
+            text: "Merge sort is always stable.",
+            claims: ["7f3a1c2b-89de-4f01-9c3e-abc123def456"],
+          },
+          b: {
+            label: "Position B",
+            text: "Some implementations are not stable.",
+            claims: ["a1b2c3d4-5678-90ef-1234-56789abcdef0"],
+          },
+        },
+      ],
+    });
+    render(<InteractiveGuide guide={guide} progress={{}} citations={[]} onToggleSection={() => {}} />);
+    // No "claim <id>"-shaped text anywhere in the disagreement section (the regression this guards against).
+    expect(screen.queryByText(/claim\s+[0-9a-f-]{6,}/i)).not.toBeInTheDocument();
+    // The raw claim ids themselves must not leak as visible text either.
+    expect(screen.queryByText(/7f3a1c2b-89de-4f01-9c3e-abc123def456/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/a1b2c3d4-5678-90ef-1234-56789abcdef0/)).not.toBeInTheDocument();
+    // The neutral labels drive the headings instead.
+    expect(screen.getByText("Position A")).toBeInTheDocument();
+    expect(screen.getByText("Position B")).toBeInTheDocument();
+  });
+
   it("renders open questions in a visually-distinct advisory box", () => {
     const guide = baseGuide({ open_questions: ["Does this hold for linked lists?"] });
     render(<InteractiveGuide guide={guide} progress={{}} citations={[]} onToggleSection={() => {}} />);

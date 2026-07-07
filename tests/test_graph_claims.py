@@ -90,6 +90,17 @@ def test_upsert_claim_roundtrips_kind(clean_graph):
     assert rows["cl2"]["kind"] == "claim"
 
 
+def test_citations_for_claims_includes_quote(clean_graph):
+    store, chunks = seeded(clean_graph)
+    store.upsert_claim(claim("cl1", chunks[0].chunk_id), unit_vec(0))
+
+    rows = store.citations_for_claims(["cl1"])
+
+    assert len(rows) == 1
+    assert rows[0]["claim_id"] == "cl1"
+    assert rows[0]["quote"] == "Invalidation is harder."
+
+
 def test_delete_source_drops_empty_concepts(clean_graph):
     from mslearn.graph.records import ConceptRecord
 
