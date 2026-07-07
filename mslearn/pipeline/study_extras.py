@@ -73,7 +73,12 @@ def _generate(ctx, concept_id, prompt_name, schema, response_key, count, project
         max_tokens=int(ctx.db.get_tunable("guide.max_tokens")),
     ))
     items = (resp.parsed or {}).get(response_key, [])
-    grounded = [item for item in items if item.get("claims")]
+    grounded = []
+    for item in items:
+        claims = item.get("claims") or []
+        clean = [c for c in claims if c and c.strip()]
+        if clean:
+            grounded.append({**item, "claims": clean})
     return grounded[:count]
 
 

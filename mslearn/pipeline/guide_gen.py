@@ -48,7 +48,7 @@ def generate_guide(ctx, concept_id, force=False, project_id="default") -> tuple[
         json_schema=GUIDE_SCHEMA,
         max_tokens=int(ctx.db.get_tunable("guide.max_tokens")),
     ))
-    guide = drop_uncited(parse_guide({**resp.parsed, "concept_id": concept_id,
+    guide = drop_uncited(parse_guide({**(resp.parsed or {}), "concept_id": concept_id,
                                       "title": concept.get("name", "")}))
     data = guide.model_dump()
     data["disagreements"] = _disagreements(ctx.graph, concept_id, project_id)

@@ -78,7 +78,11 @@ def parse_guide(obj: object) -> StudyGuide:
 def drop_uncited(guide: StudyGuide) -> StudyGuide:
     sections = []
     for s in guide.sections:
-        kept = [i for i in s.items if i.claims]
+        kept = []
+        for i in s.items:
+            if any(c and c.strip() for c in i.claims):
+                i.claims = [c for c in i.claims if c and c.strip()]
+                kept.append(i)
         if kept:
             sections.append(GuideSection(id=s.id, title=s.title, items=kept))
     guide.sections = sections

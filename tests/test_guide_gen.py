@@ -5,6 +5,7 @@ import pytest
 
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
+from mslearn.pipeline.guide import GuideParseError
 from mslearn.pipeline.guide_gen import generate_guide
 from mslearn.settings import Settings
 from mslearn.worker.context import PipelineContext
@@ -126,3 +127,16 @@ def test_generate_guide_unknown_concept_raises_keyerror(tmp_path):
 
     with pytest.raises(KeyError):
         generate_guide(ctx, "nope")
+
+
+def test_generate_guide_none_parsed_does_not_raise_typeerror(tmp_path):
+    # A provider that returns parsed=None (e.g. a malformed/empty completion)
+    # must not blow up generate_guide with `TypeError: argument of type
+    # 'NoneType' is not a mapping` from `{**resp.parsed, ...}`. It should
+    # instead fail the schema validation that already exists, surfacing as
+    # a GuideParseError the caller can handle.
+    router = ScriptedRouter(outputs=[None])
+    ctx = make_ctx(tmp_path, router)
+
+    with pytest.raises(GuideParseError):
+        generate_guide(ctx, "con1", force=True)

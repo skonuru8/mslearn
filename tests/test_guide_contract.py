@@ -40,3 +40,24 @@ def test_tl_dr_blanked_when_no_claims_and_all_sections_uncited():
     assert g.sections == []
     assert g.tl_dr.claims == []
     assert g.tl_dr.text == ""
+
+
+def test_item_with_only_blank_claim_ids_dropped_like_empty_claims():
+    raw = {**RAW, "sections": [{"id": "s1", "title": "x", "items": [
+        {"kind": "claim", "text": "t", "claims": [""]},
+        {"kind": "claim", "text": "u", "claims": ["", "  "]},
+        {"kind": "claim", "text": "kept", "claims": ["c3"]},
+    ]}]}
+    g = drop_uncited(parse_guide(raw))
+    assert len(g.sections) == 1
+    texts = [i.text for i in g.sections[0].items]
+    assert texts == ["kept"]  # blank-only claim ids dropped, same as []
+
+
+def test_item_with_mixed_blank_and_real_claim_ids_strips_blanks():
+    raw = {**RAW, "sections": [{"id": "s1", "title": "x", "items": [
+        {"kind": "claim", "text": "t", "claims": ["", "c3", " "]},
+    ]}]}
+    g = drop_uncited(parse_guide(raw))
+    assert len(g.sections) == 1
+    assert g.sections[0].items[0].claims == ["c3"]  # blank ids stripped, real id kept
