@@ -81,24 +81,40 @@ cp .env.example .env        # fill in MSL_OPENROUTER_API_KEY
 make ui-build               # build the web UI once
 ```
 
-### Every time you use it — four things must be running
+### Every time you use it — things that must be running
 ```bash
-make run        # starts all four below, in order, Ctrl-C stops both workers + API
+make run        # starts services + all three ingest/judge workers + API, Ctrl-C stops everything
 ```
 Or run them separately (useful for debugging one process at a time — `make
-worker` and `make worker-judge` each need their own terminal):
+worker` runs all three ingest/judge workers together via `-j3`; to isolate
+just one, run `make worker-prepare` / `make worker-extract` /
+`make worker-judge` each in their own terminal):
 ```bash
-make services      # 1. Redis + Neo4j containers (browser: http://localhost:7474)
-make worker        # 2. ingest worker — DOES THE ACTUAL READING/EXTRACTION
-make worker-judge  # 3. judge worker — synthesis only, kept off the ingest queue
-make serve         # 4. web app → http://localhost:8000
+make services         # 1. Redis + Neo4j containers (browser: http://localhost:7474)
+make worker            # 2. prepare + extract + judge workers — DOES THE ACTUAL READING/EXTRACTION
+make serve             # 3. web app → http://localhost:8000
 ```
 
-Ingest and synthesis run as **two separate Celery workers**, each consuming
-its own queue (`ingest`, `judge`). A synthesis pass can take minutes of model
-reasoning; if it shared worker slots with extraction it would stall every
-other source's ingestion for the duration. Splitting the queues means adding
-a source while a synthesis run is in flight still extracts immediately.
+Ingest is split into **three dedicated Celery workers**, each consuming its
+own queue:
+- `prepare` (`chunk_source_task`): adapter load, Whisper transcription,
+  embedding. Prefork, `--concurrency=2` — Whisper/memory-heavy, must stay low.
+- `extract` (`extract_chunk_task`): pure remote model I/O against
+  OpenRouter. `--pool=threads`, concurrency `MSL_EXTRACT_CONCURRENCY`
+  (default 8) — threads fit because every wait (OpenRouter httpx, rapidfuzz,
+  Neo4j bolt, Ollama embed httpx) releases the GIL.
+- `judge` (`synthesize_task`): synthesis, `--concurrency=1`. A pass can take
+  minutes of model reasoning; kept off the ingest queues so it can never
+  stall extraction.
+
+Splitting the queues means a slow Whisper transcription can't starve
+extraction's concurrency, and a synthesis run in flight never blocks a
+source that's still ingesting.
+
+> `MSL_EXTRACT_CONCURRENCY` should stay **≤ `OLLAMA_NUM_PARALLEL`**: the
+> trust-check embed call still goes to local Ollama, so pushing extraction
+> concurrency past what Ollama can serve in parallel just moves the
+> bottleneck there instead of removing it.
 
 The first audio or caption-less-video ingest downloads a Whisper model;
 transcription is serialized (one at a time) to protect memory.
@@ -208,10 +224,13 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
 - **Pipeline** (`mslearn/pipeline/`): LangGraph extraction graph
   (extract→validate→retry→escalate), synthesis (vector-blocked clustering with
   judge verdicts → conflict scan → Kahn topological curriculum).
-- **Workers** (`mslearn/worker/`): two dedicated Celery processes, one per
-  queue (`ingest`, `judge`) — synthesis can never occupy an ingest slot,
-  per-process context (fork-safe), durable chunk jobs in SQLite
-  (`data/ops.db`, WAL).
+- **Workers** (`mslearn/worker/`): three dedicated Celery processes, one per
+  queue (`prepare`, `extract`, `judge`) — synthesis can never occupy a
+  prepare/extract slot, and the Whisper/memory-heavy prepare step can never
+  starve extraction's thread-pool concurrency. The extraction LangGraph is
+  compiled once per worker process (cached on the worker context) rather
+  than per chunk. Per-process context (fork-safe), durable chunk jobs in
+  SQLite (`data/ops.db`, WAL).
 - **Providers** (`mslearn/providers/`): Ollama / OpenRouter / Claude Code
   behind one `ModelProvider` interface; every call logged to `model_calls`.
 - **Memory** (`mslearn/memory/`): in-house SQLite-backed learner memory

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# One command to run the whole app: Redis + Neo4j containers, two dedicated
-# Celery workers (ingest, judge), and the API — trapped so a single Ctrl-C
-# shuts everything down cleanly.
+# One command to run the whole app: Redis + Neo4j containers, three
+# dedicated Celery workers (prepare, extract, judge), and the API — trapped
+# so a single Ctrl-C shuts everything down cleanly.
 #
-# `make serve` alone is NOT enough (see README "four things must be
-# running"): without the worker processes, uploaded sources sit in the queue
-# forever and "Run synthesis" silently enqueues into the void. Two workers,
-# not one consuming both queues, so a multi-minute synthesis run can never
-# starve extraction of its worker slots. This script starts all four.
+# `make serve` alone is NOT enough (see README "things must be running"):
+# without the worker processes, uploaded sources sit in the queue forever
+# and "Run synthesis" silently enqueues into the void. Three workers, not
+# one consuming every queue, so a multi-minute synthesis run can never
+# starve extraction of its worker slots, and the Whisper/memory-heavy
+# prepare step can never starve extraction's high concurrency either. This
+# script starts all of them.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,28 +49,37 @@ driver.verify_connectivity()
 driver.close()
 "
 
-INGEST_WORKER_PID=""
+PREPARE_WORKER_PID=""
+EXTRACT_WORKER_PID=""
 JUDGE_WORKER_PID=""
 API_PID=""
 
 cleanup() {
   echo
   echo "== shutting down workers + API (containers keep running; 'make services-down' to stop those) =="
-  [ -n "$INGEST_WORKER_PID" ] && kill "$INGEST_WORKER_PID" 2>/dev/null || true
+  [ -n "$PREPARE_WORKER_PID" ] && kill "$PREPARE_WORKER_PID" 2>/dev/null || true
+  [ -n "$EXTRACT_WORKER_PID" ] && kill "$EXTRACT_WORKER_PID" 2>/dev/null || true
   [ -n "$JUDGE_WORKER_PID" ] && kill "$JUDGE_WORKER_PID" 2>/dev/null || true
   [ -n "$API_PID" ] && kill "$API_PID" 2>/dev/null || true
-  wait "$INGEST_WORKER_PID" "$JUDGE_WORKER_PID" "$API_PID" 2>/dev/null || true
+  wait "$PREPARE_WORKER_PID" "$EXTRACT_WORKER_PID" "$JUDGE_WORKER_PID" "$API_PID" 2>/dev/null || true
 }
 trap cleanup INT TERM
 
-# Dedicated per-queue workers, not one worker consuming both: a synthesis
-# (judge) run is a multi-minute reasoning task that must never occupy an
-# ingest slot, or it starves extraction for the whole run (see plan
-# 2026-07-03-12). -l warning: task noise goes to ingest_sources.error / the
-# failures endpoint, not the terminal; real problems still print.
-echo "== starting Celery ingest worker =="
-.venv/bin/celery -A mslearn.worker.app worker -Q ingest --concurrency=2 -n ingest@%h -l warning &
-INGEST_WORKER_PID=$!
+# Dedicated per-queue workers, not one worker consuming everything: a
+# synthesis (judge) run is a multi-minute reasoning task that must never
+# occupy a prepare/extract slot (see plan 2026-07-03-12), and the
+# Whisper/memory-heavy prepare step must stay at low prefork concurrency
+# while extraction (pure remote OpenRouter I/O) scales far higher via a
+# thread pool (see plan 2026-07-06 Phase 4). -l warning: task noise goes to
+# ingest_sources.error / the failures endpoint, not the terminal; real
+# problems still print.
+echo "== starting Celery prepare worker =="
+.venv/bin/celery -A mslearn.worker.app worker -Q prepare --concurrency=2 -n prepare@%h -l warning &
+PREPARE_WORKER_PID=$!
+
+echo "== starting Celery extract worker =="
+.venv/bin/celery -A mslearn.worker.app worker -Q extract --pool=threads --concurrency="${MSL_EXTRACT_CONCURRENCY:-8}" -n extract@%h -l warning &
+EXTRACT_WORKER_PID=$!
 
 echo "== starting Celery judge (synthesis) worker =="
 .venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=1 -n judge@%h -l warning &
@@ -91,4 +102,4 @@ API_PID=$!
 echo
 echo "mslearn is up: http://localhost:8000 (Ctrl-C to stop the workers + API)"
 
-wait "$INGEST_WORKER_PID" "$JUDGE_WORKER_PID" "$API_PID"
+wait "$PREPARE_WORKER_PID" "$EXTRACT_WORKER_PID" "$JUDGE_WORKER_PID" "$API_PID"

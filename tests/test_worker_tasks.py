@@ -641,10 +641,16 @@ def test_synthesize_task_start_clears_queued_marker(ctx, monkeypatch):
 
 def test_all_tasks_routed_to_consumed_queues():
     """An unrouted task lands in the default 'celery' queue, which no worker
-    consumes (dev_up.sh / make worker consume ingest,judge only) — the task
-    silently never runs. Every mslearn task must have an explicit route."""
-    consumed = {"ingest", "judge"}
+    consumes (dev_up.sh / make worker consume prepare,extract,judge only) —
+    the task silently never runs. Every mslearn task must have an explicit
+    route, and chunk_source/extract_chunk/synthesize must land on their own
+    dedicated queue (prepare/extract/judge respectively) — see plan
+    2026-07-06 Phase 4 (ingest throughput: prepare vs extract split)."""
     routes = app.conf.task_routes
+    assert routes["mslearn.worker.tasks.chunk_source_task"]["queue"] == "prepare"
+    assert routes["mslearn.worker.tasks.extract_chunk_task"]["queue"] == "extract"
+    assert routes["mslearn.worker.tasks.synthesize_task"]["queue"] == "judge"
+    consumed = {"prepare", "extract", "judge"}
     mslearn_tasks = [name for name in app.tasks if name.startswith("mslearn.")]
     assert mslearn_tasks, "task autodiscovery broken"
     for name in mslearn_tasks:
