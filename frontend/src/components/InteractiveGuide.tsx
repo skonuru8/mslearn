@@ -22,7 +22,7 @@ function kindClass(kind: string): string {
 }
 
 /** Assigns each claim id the next free number, in first-appearance order. Scope is local to a call site (per section/tl_dr/disagreement) by design. */
-function buildClaimNumbers(claimLists: string[][]): Map<string, number> {
+export function buildClaimNumbers(claimLists: string[][]): Map<string, number> {
   const map = new Map<string, number>();
   let next = 1;
   for (const claims of claimLists) {
@@ -58,7 +58,7 @@ function citationLocator(row: CitationRow | undefined): string {
   return parts.join(" · ");
 }
 
-function ClaimText({
+export function ClaimText({
   text,
   claims,
   numberMap,
@@ -79,7 +79,7 @@ function ClaimText({
   );
 }
 
-function SourcesFooter({
+export function SourcesFooter({
   numberMap,
   citations,
 }: {
