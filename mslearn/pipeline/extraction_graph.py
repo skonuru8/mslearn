@@ -90,6 +90,25 @@ def build_extraction_graph(router, db: OpsDB):
             }
         accepted = list(state["accepted"])
         seen = {d.text for d in accepted}
+
+        # Batch every trust-check embed for this validate() pass into ONE
+        # router.embed call instead of one call per draft — check_claim used
+        # to call embedder([draft.text, quote]) itself, every single draft,
+        # which at chunk volume was one network round trip per draft. Every
+        # draft's own text plus every distinct non-empty quote among them go
+        # into a single combined request; check_claim then gets its draft's
+        # text vector directly and looks its quote vector up from a small
+        # in-memory cache seeded by that same call (see quote_embedder
+        # below) — zero extra network calls, identical cosine math.
+        texts = [d.text for d in state["drafts"]]
+        quotes = sorted({d.quote.strip() for d in state["drafts"] if d.quote.strip()})
+        embeddings = router.embed(texts + quotes) if (texts or quotes) else []
+        claim_embeddings = dict(zip(texts, embeddings[: len(texts)]))
+        quote_vectors = dict(zip(quotes, embeddings[len(texts):]))
+
+        def quote_embedder(qs: list[str]) -> list[list[float]]:
+            return [quote_vectors[q] for q in qs]
+
         failing: list[dict] = []
         reasons: list[str] = []
         for draft in state["drafts"]:
@@ -99,7 +118,8 @@ def build_extraction_graph(router, db: OpsDB):
                 state["chunk_text"], draft,
                 quote_threshold=quote_threshold,
                 embed_sim_threshold=embed_threshold,
-                embedder=router.embed,
+                embedder=quote_embedder,
+                claim_embedding=claim_embeddings.get(draft.text),
             )
             if verdict.ok:
                 accepted.append(draft)

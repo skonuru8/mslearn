@@ -175,6 +175,39 @@ def test_extraction_request_uses_max_tokens_tunable(tmp_path):
     assert router.requests[0].max_tokens == 4096
 
 
+def test_validate_batches_all_draft_embeds_into_one_call(tmp_path):
+    # Three drafts, each with its own quotable claim in one chunk. Previously
+    # check_claim embedded [draft.text, quote] once PER draft — 3 round
+    # trips. validate() must now batch all of it into exactly 1 call.
+    chunk = (
+        "Cache invalidation is one of the two hard problems in computer science. "
+        "Naming things is the other. Off-by-one errors also cause bugs."
+    )
+    multi = {"claims": [
+        {"text": "Cache invalidation is hard.", "stance": "neutral",
+         "quote": "Cache invalidation is one of the two hard problems"},
+        {"text": "Naming is hard too.", "stance": "neutral",
+         "quote": "Naming things is the other"},
+        {"text": "Off-by-one errors are common.", "stance": "neutral",
+         "quote": "Off-by-one errors also cause bugs"},
+    ]}
+
+    class CountingRouter(ScriptedRouter):
+        def __init__(self, outputs):
+            super().__init__(outputs)
+            self.embed_calls = 0
+
+        def embed(self, texts):
+            self.embed_calls += 1
+            return super().embed(texts)
+
+    router = CountingRouter([multi])
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", chunk)
+    assert len(state["accepted"]) == 3
+    assert state["rejected"] == []
+    assert router.embed_calls == 1  # one batched call, not 3
+
+
 def test_extraction_prompt_mentions_kind(tmp_path):
     p = get_prompt(db(tmp_path), "extraction")
     assert "kind" in p and "mechanism" in p and "caveat" in p

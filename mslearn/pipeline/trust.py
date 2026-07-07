@@ -30,7 +30,21 @@ def check_claim(
     quote_threshold: float,
     embed_sim_threshold: float,
     embedder: Embedder | None = None,
+    claim_embedding: list[float] | None = None,
 ) -> TrustVerdict:
+    """Verbatim-quote check (always runs, unaffected by embedding batching)
+    plus an embedding cosine sanity check between the draft's claim text and
+    its cited quote.
+
+    `claim_embedding`, when given, is the draft's ALREADY-computed text
+    embedding — extraction_graph.validate batches every draft's text embed
+    into one call per chunk instead of one call per draft (which is what
+    `embedder([draft.text, quote])` below used to cost, every single call).
+    When provided, only the quote still needs embedding, via `embedder`
+    (validate passes a cache-backed lookup there, not a live network call,
+    so this costs nothing extra); the resulting similarity is identical to
+    the un-batched path.
+    """
     reasons: list[str] = []
     quote = draft.quote.strip()
 
@@ -46,7 +60,11 @@ def check_claim(
 
     sim: float | None = None
     if embedder is not None and quote:
-        vec_text, vec_quote = embedder([draft.text, quote])
+        if claim_embedding is not None:
+            vec_text = claim_embedding
+            (vec_quote,) = embedder([quote])
+        else:
+            vec_text, vec_quote = embedder([draft.text, quote])
         sim = cosine(vec_text, vec_quote)
         if sim < embed_sim_threshold:
             reasons.append(
