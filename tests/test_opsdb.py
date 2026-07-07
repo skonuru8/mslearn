@@ -38,6 +38,18 @@ def test_wal_mode_is_active(tmp_path):
     assert mode == "wal"
 
 
+def test_study_progress_roundtrip(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    db.set_section_reviewed("default", "con1", "s1", True)
+    assert db.section_progress("default", "con1") == {"s1": True}
+    db.set_section_reviewed("default", "con1", "s1", False)
+    assert db.section_progress("default", "con1") == {"s1": False}
+
+
+def test_guide_max_tokens_default():
+    assert TUNABLE_DEFAULTS["guide.max_tokens"] == 8192.0
+
+
 def test_concurrent_writes_from_threads(tmp_path):
     import threading
 
