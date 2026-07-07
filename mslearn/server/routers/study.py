@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from mslearn.pipeline.guide_gen import generate_guide
 from mslearn.pipeline.quiz import generate_question, grade_answer, next_concept, public_quiz_stats
-from mslearn.pipeline.teaching import TeachingError, generate_teaching
+from mslearn.pipeline.study_extras import make_flashcards, make_selfcheck
 from mslearn.server.deps import get_ctx, get_project_id
 from mslearn.worker.tasks import synthesize_task
 
@@ -12,6 +13,15 @@ quiz_router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
 class FlagRequest(BaseModel):
     reason: str
+
+
+class ProgressRequest(BaseModel):
+    section_id: str
+    reviewed: bool
+
+
+class CountRequest(BaseModel):
+    count: int = 5
 
 
 class QuizAnswerRequest(BaseModel):
@@ -55,16 +65,57 @@ def teach(
     concept = ctx.graph.get_concept(concept_id, project_id=project_id)
     if concept is None:
         raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
-    # Same condition generate_teaching uses internally to decide whether to
+    # Same condition generate_guide uses internally to decide whether to
     # skip the (slow, first-time-can-take-a-minute) LLM call — computed here
     # too so the response can tell the UI whether this was a cache hit,
-    # without changing generate_teaching's own return contract.
+    # without changing generate_guide's own return contract.
     cached = bool(concept.get("teach_md")) and not force and not concept.get("dirty", False)
     try:
-        markdown = generate_teaching(ctx, concept_id, force=force, project_id=project_id)
-    except TeachingError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from None
-    return {"markdown": markdown, "cached": cached}
+        guide = generate_guide(ctx, concept_id, force=force, project_id=project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return {
+        "guide": guide,
+        "cached": cached,
+        "progress": ctx.db.section_progress(project_id, concept_id),
+    }
+
+
+@router.post("/concepts/{concept_id}/progress")
+def set_progress(
+    concept_id: str,
+    body: ProgressRequest,
+    ctx=Depends(get_ctx),
+    project_id: str = Depends(get_project_id),
+):
+    if ctx.graph.get_concept(concept_id, project_id=project_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
+    ctx.db.set_section_reviewed(project_id, concept_id, body.section_id, body.reviewed)
+    return {"progress": ctx.db.section_progress(project_id, concept_id)}
+
+
+@router.post("/concepts/{concept_id}/flashcards")
+def flashcards(
+    concept_id: str,
+    body: CountRequest,
+    ctx=Depends(get_ctx),
+    project_id: str = Depends(get_project_id),
+):
+    if ctx.graph.get_concept(concept_id, project_id=project_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
+    return {"cards": make_flashcards(ctx, concept_id, body.count, project_id)}
+
+
+@router.post("/concepts/{concept_id}/selfcheck")
+def selfcheck(
+    concept_id: str,
+    body: CountRequest,
+    ctx=Depends(get_ctx),
+    project_id: str = Depends(get_project_id),
+):
+    if ctx.graph.get_concept(concept_id, project_id=project_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
+    return {"checks": make_selfcheck(ctx, concept_id, body.count, project_id)}
 
 
 @router.post("/claims/{claim_id}/flag")

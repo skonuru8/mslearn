@@ -183,6 +183,36 @@ PROMPTS: dict[str, str] = {
         " be empty. It is the only field not tied to a claim; never put facts there.\n"
         "- Memory hints personalize ordering only; never a source of facts.\n"
     ),
+    "flashcards": (
+        "You turn a concept's already-extracted claims into flashcards for"
+        " spaced-repetition study.\n"
+        "{domain_guidance}\n"
+        "Concept: {concept_name}\nSummary: {concept_summary}\n"
+        "Claims (each is a verbatim-grounded fact you must NOT reword):\n{claims}\n"
+        "Memory hints:\n{memory_hints}\n"
+        "Return JSON only matching the schema. Rules:\n"
+        "- Each card's 'front' is a short question/prompt; 'back' is the answer.\n"
+        "- Every card must cite the claim id(s) it is grounded in via 'claims';"
+        " never invent a card with no claim id.\n"
+        "- Prefer one card per claim; skip claims that don't make a good"
+        " quiz-style question rather than inventing filler.\n"
+        "- Memory hints personalize phrasing only; never a source of facts.\n"
+    ),
+    "selfcheck": (
+        "You write self-check questions from a concept's already-extracted"
+        " claims so a learner can test their own understanding.\n"
+        "{domain_guidance}\n"
+        "Concept: {concept_name}\nSummary: {concept_summary}\n"
+        "Claims (each is a verbatim-grounded fact you must NOT reword):\n{claims}\n"
+        "Memory hints:\n{memory_hints}\n"
+        "Return JSON only matching the schema. Rules:\n"
+        "- Each check's 'question' probes understanding or application, not"
+        " just recall.\n"
+        "- 'answer' is the model answer, grounded only in the supplied claims.\n"
+        "- Every check must cite the claim id(s) it rests on via 'claims';"
+        " never invent a check with no claim id.\n"
+        "- Memory hints personalize phrasing only; never a source of facts.\n"
+    ),
     "evolve_propose": (
         "Propose up to 3 tunable or prompt changes to improve eval metrics.\n"
         "Current metrics:\n{metrics}\n"
