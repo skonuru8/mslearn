@@ -128,6 +128,7 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "trust.quote_threshold": 90.0,
     "trust.embed_sim_threshold": 0.35,
     "extract.max_attempts": 2.0,
+    "extract.max_claims": 15.0,
     # 8192 was sized for hidden-reasoning overhead (Plan 09). With reasoning
     # disabled on every openrouter role (profiles.yaml), the budget only has
     # to cover the answer itself: measured extraction outputs over 656 live

@@ -1,5 +1,6 @@
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.extraction_graph import run_extraction
+from mslearn.prompts import get_prompt
 from mslearn.providers.base import ModelResponse, ProviderBadOutputError, ProviderError
 
 CHUNK = "Cache invalidation is one of the two hard problems in computer science."
@@ -146,3 +147,28 @@ def test_extraction_request_uses_max_tokens_tunable(tmp_path):
     d.set_tunable("extract.max_tokens", 4096.0, "test")
     run_extraction(router, d, "c1", CHUNK)
     assert router.requests[0].max_tokens == 4096
+
+
+def test_extraction_prompt_mentions_kind(tmp_path):
+    p = get_prompt(db(tmp_path), "extraction")
+    assert "kind" in p and "mechanism" in p and "caveat" in p
+
+
+def test_extraction_prompt_injects_max_claims_tunable(tmp_path):
+    class RecordingRouter(ScriptedRouter):
+        def __init__(self, outputs):
+            super().__init__(outputs)
+            self.requests = []
+
+        def complete(self, role, request):
+            self.requests.append(request)
+            return super().complete(role, request)
+
+    router = RecordingRouter([GOOD])
+    d = db(tmp_path)
+    d.set_tunable("extract.max_claims", 5.0, "test")
+    run_extraction(router, d, "c1", CHUNK)
+    prompt_text = router.requests[0].messages[0].content
+    assert "at most 5 claims" in prompt_text
+    assert "{max_claims}" not in prompt_text
+    assert '{"claims": []}' in prompt_text

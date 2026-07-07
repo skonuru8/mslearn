@@ -36,9 +36,10 @@ class ExtractionState(TypedDict):
 def build_extraction_graph(router, db: OpsDB):
     max_attempts = int(db.get_tunable("extract.max_attempts"))
     max_tokens = int(db.get_tunable("extract.max_tokens"))
+    max_claims = int(db.get_tunable("extract.max_claims"))
     quote_threshold = db.get_tunable("trust.quote_threshold")
     embed_threshold = db.get_tunable("trust.embed_sim_threshold")
-    base_prompt = get_prompt(db, "extraction")
+    base_prompt = get_prompt(db, "extraction").format(max_claims=max_claims)
     retry_suffix = get_prompt(db, "extraction_retry_suffix")
 
     def extract(state: ExtractionState) -> dict:

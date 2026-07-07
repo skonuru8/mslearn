@@ -1,4 +1,8 @@
-from mslearn.opsdb import OpsDB
+from mslearn.opsdb import TUNABLE_DEFAULTS, OpsDB
+
+
+def test_extract_max_claims_default():
+    assert TUNABLE_DEFAULTS["extract.max_claims"] == 15.0
 
 
 def test_log_and_read_model_call(tmp_path):
