@@ -1,0 +1,86 @@
+from __future__ import annotations
+from pydantic import BaseModel, ValidationError, field_validator
+from mslearn.pipeline.contracts import CLAIM_KINDS
+from mslearn.graph.records import CONFLICT_CLASSIFICATIONS
+
+class GuideParseError(Exception): ...
+
+class GuideItem(BaseModel):
+    kind: str
+    text: str
+    claims: list[str] = []
+
+class GuideSection(BaseModel):
+    id: str
+    title: str
+    items: list[GuideItem] = []
+
+class DisagreeSide(BaseModel):
+    label: str
+    text: str
+    claims: list[str] = []
+
+class Disagreement(BaseModel):
+    summary: str
+    classification: str
+    a: DisagreeSide
+    b: DisagreeSide
+
+    @field_validator("classification")
+    @classmethod
+    def _classification_known(cls, value: str) -> str:
+        if value not in CONFLICT_CLASSIFICATIONS:
+            raise ValueError(f"unknown conflict classification {value!r}")
+        return value
+
+class TlDr(BaseModel):
+    text: str
+    claims: list[str] = []
+
+class StudyGuide(BaseModel):
+    concept_id: str
+    title: str
+    tl_dr: TlDr
+    skeleton: list[str] = []
+    sections: list[GuideSection] = []
+    disagreements: list[Disagreement] = []
+    open_questions: list[str] = []
+
+GUIDE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "concept_id": {"type": "string"},
+        "title": {"type": "string"},
+        "tl_dr": {"type": "object", "properties": {
+            "text": {"type": "string"},
+            "claims": {"type": "array", "items": {"type": "string"}}},
+            "required": ["text", "claims"], "additionalProperties": False},
+        "skeleton": {"type": "array", "items": {"type": "string"}},
+        "sections": {"type": "array", "items": {"type": "object", "properties": {
+            "id": {"type": "string"}, "title": {"type": "string"},
+            "items": {"type": "array", "items": {"type": "object", "properties": {
+                "kind": {"enum": list(CLAIM_KINDS)}, "text": {"type": "string"},
+                "claims": {"type": "array", "items": {"type": "string"}}},
+                "required": ["kind", "text", "claims"], "additionalProperties": False}}},
+            "required": ["id", "title", "items"], "additionalProperties": False}},
+        "open_questions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["concept_id", "title", "tl_dr", "skeleton", "sections", "open_questions"],
+    "additionalProperties": False,
+}
+
+def parse_guide(obj: object) -> StudyGuide:
+    try:
+        return StudyGuide.model_validate(obj)
+    except ValidationError as exc:
+        raise GuideParseError(str(exc)[:500]) from exc
+
+def drop_uncited(guide: StudyGuide) -> StudyGuide:
+    sections = []
+    for s in guide.sections:
+        kept = [i for i in s.items if i.claims]
+        if kept:
+            sections.append(GuideSection(id=s.id, title=s.title, items=kept))
+    guide.sections = sections
+    guide.skeleton = [t for t in guide.skeleton if any(s.title == t for s in sections)] or [s.title for s in sections]
+    return guide
