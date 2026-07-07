@@ -24,14 +24,14 @@ def _disagreements(graph, concept_id, project_id):
     return out
 
 
-def generate_guide(ctx, concept_id, force=False, project_id="default") -> dict:
+def generate_guide(ctx, concept_id, force=False, project_id="default") -> tuple[dict, bool]:
     concept = ctx.graph.get_concept(concept_id, project_id=project_id)
     if concept is None:
         raise KeyError(f"unknown concept {concept_id!r}")
     cached = concept.get("teach_md") or ""
     if cached and not force and not concept.get("dirty", False):
         try:
-            return json.loads(cached)
+            return json.loads(cached), True
         except json.JSONDecodeError:
             pass  # stale markdown from before the guide migration → regenerate
     claims = _trusted_claims(ctx.graph.claims_in_concept(concept_id, project_id=project_id))
@@ -54,4 +54,4 @@ def generate_guide(ctx, concept_id, force=False, project_id="default") -> dict:
     data["disagreements"] = _disagreements(ctx.graph, concept_id, project_id)
     ctx.graph.set_concept_teaching(concept_id, json.dumps(data), project_id=project_id)
     ctx.graph.mark_concept_dirty(concept_id, False, project_id=project_id)
-    return data
+    return data, False

@@ -74,8 +74,9 @@ def fake_ctx_raising_memory(tmp_path):
 
 
 def test_generate_guide_drops_uncited_and_adds_disagreements(fake_ctx):
-    out = generate_guide(fake_ctx, "con1", force=True, project_id="default")
+    out, cached = generate_guide(fake_ctx, "con1", force=True, project_id="default")
     assert out["title"]
+    assert cached is False
     assert all(item["claims"] for sec in out["sections"] for item in sec["items"])
     assert out["disagreements"][0]["classification"] in {
         "context_dependent", "outdated", "genuine_debate", "evidence_mismatch",
@@ -83,7 +84,7 @@ def test_generate_guide_drops_uncited_and_adds_disagreements(fake_ctx):
 
 
 def test_generate_guide_memory_failure_degrades(fake_ctx_raising_memory):
-    out = generate_guide(fake_ctx_raising_memory, "con1", force=True)
+    out, _cached = generate_guide(fake_ctx_raising_memory, "con1", force=True)
     assert out["title"]  # no raise
 
 
@@ -91,10 +92,12 @@ def test_generate_guide_caches_json_after_first_call(tmp_path):
     router = ScriptedRouter(outputs=[dict(GUIDE_OUTPUT)])
     ctx = make_ctx(tmp_path, router)
 
-    first = generate_guide(ctx, "con1")
-    second = generate_guide(ctx, "con1")
+    first, first_cached = generate_guide(ctx, "con1")
+    second, second_cached = generate_guide(ctx, "con1")
 
     assert first == second
+    assert first_cached is False
+    assert second_cached is True
     assert router.calls == ["interactive"]
     cached = json.loads(ctx.graph.get_concept("con1")["teach_md"])
     assert cached["title"] == "Merge sort"
@@ -105,9 +108,10 @@ def test_generate_guide_regenerates_when_cached_content_is_stale_markdown(tmp_pa
     ctx = make_ctx(tmp_path, router)
     ctx.graph.set_concept_teaching("con1", "## Explanation\nOld markdown lesson.")
 
-    out = generate_guide(ctx, "con1")
+    out, cached = generate_guide(ctx, "con1")
 
     assert out["title"] == "Merge sort"
+    assert cached is False
     assert router.calls == ["interactive"]
 
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from mslearn.pipeline.guide_gen import generate_guide
 from mslearn.pipeline.quiz import generate_question, grade_answer, next_concept, public_quiz_stats
@@ -21,7 +21,7 @@ class ProgressRequest(BaseModel):
 
 
 class CountRequest(BaseModel):
-    count: int = 5
+    count: int = Field(default=5, ge=1, le=50)
 
 
 class QuizAnswerRequest(BaseModel):
@@ -65,13 +65,8 @@ def teach(
     concept = ctx.graph.get_concept(concept_id, project_id=project_id)
     if concept is None:
         raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
-    # Same condition generate_guide uses internally to decide whether to
-    # skip the (slow, first-time-can-take-a-minute) LLM call — computed here
-    # too so the response can tell the UI whether this was a cache hit,
-    # without changing generate_guide's own return contract.
-    cached = bool(concept.get("teach_md")) and not force and not concept.get("dirty", False)
     try:
-        guide = generate_guide(ctx, concept_id, force=force, project_id=project_id)
+        guide, cached = generate_guide(ctx, concept_id, force=force, project_id=project_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     return {
@@ -103,7 +98,11 @@ def flashcards(
 ):
     if ctx.graph.get_concept(concept_id, project_id=project_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
-    return {"cards": make_flashcards(ctx, concept_id, body.count, project_id)}
+    try:
+        cards = make_flashcards(ctx, concept_id, body.count, project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return {"cards": cards}
 
 
 @router.post("/concepts/{concept_id}/selfcheck")
@@ -115,7 +114,11 @@ def selfcheck(
 ):
     if ctx.graph.get_concept(concept_id, project_id=project_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown concept {concept_id!r}")
-    return {"checks": make_selfcheck(ctx, concept_id, body.count, project_id)}
+    try:
+        checks = make_selfcheck(ctx, concept_id, body.count, project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return {"checks": checks}
 
 
 @router.post("/claims/{claim_id}/flag")

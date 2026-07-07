@@ -283,6 +283,69 @@ def test_flag_claim_rejects_dirties_clears_cache_and_enqueues(study_client):
     assert task.count == 1
 
 
+def test_teach_reports_honest_cached_flag_when_cache_is_stale_markdown(study_client_factory):
+    # A concept whose teach_md holds pre-migration markdown (not JSON) and
+    # isn't dirty still triggers a real regeneration inside generate_guide's
+    # JSONDecodeError fallback — the endpoint must say cached=false, not
+    # blindly trust the pre-call teach_md presence check.
+    client, graph, router, _task = study_client_factory(outputs=[dict(GUIDE_JSON)])
+    graph.set_concept_teaching("k1", "## Explanation\nOld markdown lesson.")
+
+    response = client.get("/api/study/concepts/k1/teach")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cached"] is False
+    assert router.calls == ["interactive"]
+
+
+def test_flashcards_rejects_negative_count(study_client):
+    client, _graph, _router, _task = study_client
+    client.get("/api/study/concepts/k1/teach")
+
+    response = client.post("/api/study/concepts/k1/flashcards", json={"count": -1})
+
+    assert response.status_code == 422
+
+
+def test_selfcheck_rejects_zero_count(study_client):
+    client, _graph, _router, _task = study_client
+    client.get("/api/study/concepts/k1/teach")
+
+    response = client.post("/api/study/concepts/k1/selfcheck", json={"count": 0})
+
+    assert response.status_code == 422
+
+
+def test_flashcards_404s_on_keyerror_race_instead_of_500(study_client, monkeypatch):
+    # The concept exists at the pre-check but the generator itself raises
+    # KeyError (e.g. the concept was removed between the check and the
+    # generation call) — the endpoint must still 404, not 500.
+    client, _graph, _router, _task = study_client
+
+    def _raise(*_args, **_kwargs):
+        raise KeyError("unknown concept 'k1'")
+
+    monkeypatch.setattr("mslearn.server.routers.study.make_flashcards", _raise)
+
+    response = client.post("/api/study/concepts/k1/flashcards", json={"count": 3})
+
+    assert response.status_code == 404
+
+
+def test_selfcheck_404s_on_keyerror_race_instead_of_500(study_client, monkeypatch):
+    client, _graph, _router, _task = study_client
+
+    def _raise(*_args, **_kwargs):
+        raise KeyError("unknown concept 'k1'")
+
+    monkeypatch.setattr("mslearn.server.routers.study.make_selfcheck", _raise)
+
+    response = client.post("/api/study/concepts/k1/selfcheck", json={"count": 3})
+
+    assert response.status_code == 404
+
+
 def test_study_unknown_ids_404(study_client):
     client, _graph, _router, _task = study_client
 

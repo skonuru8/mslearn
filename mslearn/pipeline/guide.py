@@ -83,4 +83,10 @@ def drop_uncited(guide: StudyGuide) -> StudyGuide:
             sections.append(GuideSection(id=s.id, title=s.title, items=kept))
     guide.sections = sections
     guide.skeleton = [t for t in guide.skeleton if any(s.title == t for s in sections)] or [s.title for s in sections]
+    if not guide.tl_dr.claims:
+        first_cited = next((i for s in sections for i in s.items if i.claims), None)
+        if first_cited is not None:
+            guide.tl_dr.claims = first_cited.claims
+        else:
+            guide.tl_dr.text = ""
     return guide
