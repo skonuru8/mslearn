@@ -43,6 +43,11 @@ class ScriptedRouter:
             return [self.embeddings.pop(0) for _ in texts]
         return [[1.0, 0.0] for _ in texts]
 
+    def resolves_same(self, a, b):
+        # Default: roles resolve to DIFFERENT models, so escalation stays
+        # useful — matches every existing escalation test using this fake.
+        return False
+
 
 class InMemoryGraphStore:
     def __init__(

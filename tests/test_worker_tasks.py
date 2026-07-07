@@ -106,6 +106,9 @@ def test_deleted_source_skips_extraction_with_one_info_line(ctx, caplog):
         def embed(self, texts):
             raise AssertionError("no embed calls for a deleted source")
 
+        def resolves_same(self, a, b):
+            return False
+
     context = ctx(NoCallRouter())
     context.db.delete_source("s1")
     with caplog.at_level(logging.INFO, logger="mslearn"):

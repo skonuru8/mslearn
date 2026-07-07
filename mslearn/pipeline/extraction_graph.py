@@ -41,6 +41,14 @@ def build_extraction_graph(router, db: OpsDB):
     embed_threshold = db.get_tunable("trust.embed_sim_threshold")
     base_prompt = get_prompt(db, "extraction").format(max_claims=max_claims)
     retry_suffix = get_prompt(db, "extraction_retry_suffix")
+    # Escalating re-runs extraction under the "synthesis" role. When that
+    # role resolves to the SAME provider+model as "extraction" (e.g. the
+    # openrouter profile: both deepseek-v4-flash), escalation is a no-op
+    # that doubles calls/tokens for zero model change — skip the escalate
+    # edge entirely in that case. Computed once at build time (not per
+    # chunk): a profile switch is picked up on the next worker-process
+    # restart, same as every other tunable read here.
+    escalation_useful = not router.resolves_same("extraction", "synthesis")
 
     def extract(state: ExtractionState) -> dict:
         prompt = f"{base_prompt}\n\nCHUNK:\n{state['chunk_text']}"
@@ -106,7 +114,7 @@ def build_extraction_graph(router, db: OpsDB):
             return "done"
         if state["attempt"] < max_attempts:
             return "retry"
-        if not state["escalated"]:
+        if not state["escalated"] and escalation_useful:
             return "escalate"
         return "done"
 

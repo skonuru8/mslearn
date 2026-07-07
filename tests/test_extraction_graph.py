@@ -29,6 +29,21 @@ class ScriptedRouter:
     def embed(self, texts):
         return [[1.0, 0.0] for _ in texts]
 
+    def resolves_same(self, a, b):
+        # Mirrors the openrouter/claude-code profile difference by default:
+        # extraction and synthesis are DIFFERENT models, so escalation is
+        # useful — matches every existing escalation test in this file.
+        return False
+
+
+class SameModelRouter(ScriptedRouter):
+    """Extraction and synthesis resolve to the identical provider+model —
+    escalating to "synthesis" would just re-run the same model for zero
+    change, so build_extraction_graph must skip the escalate edge."""
+
+    def resolves_same(self, a, b):
+        return True
+
 
 def db(tmp_path):
     return OpsDB(tmp_path / "ops.db")
@@ -61,6 +76,17 @@ def test_escalated_failure_ends_with_rejects(tmp_path):
     state = run_extraction(build_extraction_graph(router, db(tmp_path)), "c1", CHUNK)
     assert state["accepted"] == [] and len(state["rejected"]) == 1
     assert state["escalated"] is True
+
+
+def test_no_escalation_when_roles_same_model(tmp_path):
+    # extraction and synthesis map to the same provider+model (openrouter
+    # profile: both deepseek-v4-flash) — escalating doubles calls/tokens for
+    # zero model change, so route() must return "done" instead of "escalate"
+    # once max_attempts is exhausted.
+    router = SameModelRouter([BAD, BAD])
+    state = run_extraction(build_extraction_graph(router, db(tmp_path)), "s:1", CHUNK)
+    assert state["escalated"] is False  # never escalated to an identical model
+    assert router.calls == ["extraction", "extraction"]  # no third "synthesis" call
 
 
 def test_provider_error_sets_error(tmp_path):
