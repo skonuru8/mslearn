@@ -6,6 +6,8 @@ from mslearn.graph.records import ClaimRecord
 
 STANCES = ("recommends", "warns_against", "neutral")
 
+CLAIM_KINDS = ("definition", "claim", "mechanism", "example", "caveat", "actionable")
+
 EXTRACTION_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -17,8 +19,9 @@ EXTRACTION_SCHEMA: dict = {
                     "text": {"type": "string"},
                     "stance": {"enum": list(STANCES)},
                     "quote": {"type": "string"},
+                    "kind": {"enum": list(CLAIM_KINDS)},
                 },
-                "required": ["text", "stance", "quote"],
+                "required": ["text", "stance", "quote", "kind"],
                 "additionalProperties": False,
             },
         }
@@ -36,12 +39,20 @@ class ClaimDraft(BaseModel):
     text: str
     stance: str
     quote: str
+    kind: str = "claim"
 
     @field_validator("stance")
     @classmethod
     def _stance_known(cls, value: str) -> str:
         if value not in STANCES:
             raise ValueError(f"unknown stance {value!r}")
+        return value
+
+    @field_validator("kind")
+    @classmethod
+    def _kind_known(cls, value: str) -> str:
+        if value not in CLAIM_KINDS:
+            raise ValueError(f"unknown kind {value!r}")
         return value
 
 
@@ -66,4 +77,5 @@ def to_claim_record(draft: ClaimDraft, *, chunk_id: str, source_id: str,
         claim_id=derive_claim_id(chunk_id, draft.text),
         chunk_id=chunk_id, source_id=source_id,
         text=draft.text, stance=draft.stance, quote=draft.quote, trust=trust,
+        kind=draft.kind,
     )

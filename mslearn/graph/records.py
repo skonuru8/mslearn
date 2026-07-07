@@ -23,6 +23,7 @@ class ClaimRecord:
     stance: str  # "recommends" | "warns_against" | "neutral"
     quote: str
     trust: str   # "trusted" | "escalated" | "image_observed" | "rejected"
+    kind: str = "claim"
 
 
 @dataclass(frozen=True)
