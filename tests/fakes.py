@@ -172,6 +172,7 @@ class InMemoryGraphStore:
         quote: str = "",
         chunk_id: str | None = None,
         project_id: str = "default",
+        kind: str = "claim",
     ) -> None:
         self.claims[claim_id] = {
             "claim_id": claim_id,
@@ -183,6 +184,7 @@ class InMemoryGraphStore:
             "quote": quote,
             "chunk_id": chunk_id,
             "project_id": project_id,
+            "kind": kind,
         }
         if spine_seq is not None:
             self.spine_seq[claim_id] = int(spine_seq)
@@ -195,6 +197,7 @@ class InMemoryGraphStore:
             record.claim_id, record.text, record.stance, record.source_id,
             list(embedding), trust=record.trust, quote=record.quote,
             chunk_id=record.chunk_id, project_id=project_id,
+            kind=getattr(record, "kind", "claim"),
         )
 
     def unassigned_trusted_claims(self, *, project_id: str = "default") -> list[dict]:
@@ -287,6 +290,7 @@ class InMemoryGraphStore:
                     "source_id": claim["source_id"],
                     "quote": claim.get("quote", ""),
                     "chunk_id": claim.get("chunk_id"),
+                    "kind": claim.get("kind", "claim"),
                 }
             )
         return sorted(rows, key=lambda r: r["claim_id"])
