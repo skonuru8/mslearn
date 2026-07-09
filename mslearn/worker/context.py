@@ -1,9 +1,11 @@
 import logging
+import threading
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 _context = None
+_context_lock = threading.Lock()
 
 
 @dataclass
@@ -25,7 +27,8 @@ class PipelineContext:
     # extraction/trust tunable and recompiles the StateGraph — real overhead
     # at chunk volume). None is a valid value for tests/callers that never
     # touch extract_chunk_task; build_default_context always populates it, and
-    # a worker restart re-reads the tunables.
+    # a worker restart re-reads the tunables (built lazily by get_context(),
+    # or eagerly by the prefork worker_process_init warmup — see app.py).
     extraction_graph: object | None = None
 
 
@@ -35,8 +38,23 @@ def set_context(context: PipelineContext) -> None:
 
 
 def get_context() -> PipelineContext:
+    """Return the process-wide PipelineContext, building it lazily on first
+    use if needed.
+
+    Historically this relied on the Celery `worker_process_init` signal to
+    populate `_context`, but that signal only fires per forked child process
+    — it never fires under non-forking pools (e.g. `--pool=threads` or
+    `--pool=solo`), where tasks run as threads inside MainProcess. Building
+    lazily here decouples correctness from the pool type: whichever caller
+    (thread or process) asks first triggers the build, under a double-checked
+    lock so concurrent callers (e.g. several threads-pool workers) still get
+    exactly one build and the same shared instance.
+    """
+    global _context
     if _context is None:
-        raise RuntimeError("pipeline context not initialised (worker_process_init not run?)")
+        with _context_lock:
+            if _context is None:
+                _context = build_default_context()
     return _context
 
 

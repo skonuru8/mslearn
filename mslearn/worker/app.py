@@ -35,6 +35,17 @@ app.autodiscover_tasks(["mslearn.worker"])
 
 @worker_process_init.connect
 def _init_worker_process(**_kwargs):
+    """Optional warmup: eagerly build the PipelineContext in each forked
+    child process so the first task doesn't pay the build cost.
+
+    This signal only fires under forking pools (prefork); non-forking pools
+    (threads, solo — e.g. the `extract` worker, see Makefile worker-extract)
+    never fire it. That's fine: get_context() self-initializes lazily and
+    thread-safely on first use, so correctness never depends on this signal
+    running. Do NOT add a worker_init handler to build in the prefork parent
+    instead — that would leak fork-inherited sockets/connections into every
+    child.
+    """
     from mslearn.worker.context import build_default_context, set_context
 
     set_context(build_default_context())
