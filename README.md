@@ -24,14 +24,21 @@ Spec: `docs/superpowers/specs/2026-07-02-multi-source-learning-system-design.md`
    first). When two sources disagree, the conflict is kept and classified
    (outdated vs. genuine debate vs. context-dependent vs. evidence mismatch) —
    never silently merged.
-4. **You study.** Browse the curriculum, read generated teaching — detailed
-   study notes that work through every trust-gated claim in the concept, not
-   a terse bullet summary, with a `[claim:…]` citation on every factual
-   sentence you can click — take reasoning quizzes graded with explanations,
-   or just chat with your corpus. The app remembers what confused you and
-   adapts. Notes are only as rich as the claims extracted from the source: a
-   sparse extraction (e.g. from a text-light image) yields thinner notes,
-   because depth comes only from what's trust-gated, never invented.
+4. **You study.** Browse the curriculum and open a concept's **interactive
+   guide** — a TL;DR, a mini-map outline, and stacked collapsible sections
+   built entirely from trust-gated claims, color-coded by what each item
+   *is* (definition/claim/mechanism/example/caveat/actionable). Every
+   section has a "Sources" footer: numbered superscripts next to each
+   sentence expand to the exact quote and locator behind it (no raw claim-id
+   strings ever shown), and your "reviewed" progress per section is saved.
+   Where sources disagree, a two-column compare shows both sides side by
+   side. Pull **on-demand flashcards or a self-check quiz** for the concept
+   whenever you want them. Take reasoning quizzes graded with explanations,
+   or just chat with your corpus — the app remembers what confused you and
+   adapts. The guide is only as rich as the claims extracted from the
+   source: a sparse extraction (e.g. from a text-light image) yields a
+   thinner guide, because depth comes only from what's trust-gated, never
+   invented.
 5. **You export.** Markdown notes, Anki `.apkg` decks, and a full graph dump
    (GraphML + JSON) so your knowledge is never locked in.
 
@@ -42,19 +49,19 @@ You upload `algorithms-lecture-notes.pdf` as your **main source**. The app
 chunks it, extracts claims ("Merge sort runs in O(n log n) time" with the exact
 supporting quote), and builds concepts like *Asymptotic notation* →
 *Divide-and-conquer* → *Merge sort*, ordered so prerequisites come first. You
-open a concept, read the teaching page, hit **Quiz me**, answer in free text,
-and get graded with an explanation citing the exact claims.
+open a concept, read the interactive guide, hit **Quiz me**, answer in free
+text, and get graded with an explanation citing the exact claims.
 
 **Scenario 2 — book + YouTube disagree.**
 You add a nutrition book as the main source, then paste three YouTube links as
 extra material. One video says "eat within an 8-hour window"; the book says
 timing barely matters vs. total intake. The app puts both claims in the same
-concept, marks a **conflict (genuine debate)**, and every teaching page for
-that concept shows a "Where sources disagree" section presenting both sides
-with citations — instead of pretending there's one answer.
+concept, marks a **conflict (genuine debate)**, and the concept's interactive
+guide shows a "Where sources disagree" section presenting both sides with
+citations — instead of pretending there's one answer.
 
 **Scenario 3 — flag a bad claim.**
-Reading a teaching page you spot a claim that's wrong or out of context. Click
+Reading a concept's guide you spot a claim that's wrong or out of context. Click
 **Flag**, give a reason. The claim is quarantined, the affected concept is
 marked dirty and regenerated without it. Your flag also feeds the eval golden
 sets.
@@ -133,8 +140,13 @@ transcription is serialized (one at a time) to protect memory.
 - **Run synthesis**: builds/updates concepts + curriculum from extracted
   claims. Runs automatically when a source finishes; the button forces a pass.
   Needs the worker running and at least some trusted claims in the graph.
-- **Curriculum / Concept** pages: ordered concepts, teaching with citations,
-  conflict callouts, flagging.
+- **Curriculum / Concept** pages: ordered concepts; each concept opens an
+  **interactive guide** (TL;DR, mini-map, kind-colored collapsible sections,
+  numbered source citations, "Where sources disagree" compare) with
+  per-section reviewed progress saved as you go, plus flagging. Pull
+  **on-demand flashcards and a self-check quiz** for the concept whenever
+  you want them — generated on request, cited, and only from claims that
+  support them.
 - **Quiz**: free-text answers, graded with explanations, results feed memory.
 - **Chat**: streaming Q&A over your corpus only — it will say "insufficient
   material" rather than invent an answer.
@@ -217,13 +229,26 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
   profile uses `openai/gpt-4o-mini` for this; offline uses a local `qwen2.5vl`
   (needs `ollama pull qwen2.5vl:7b`).
 - **Trust gate** (`mslearn/pipeline/trust.py`): rapidfuzz verbatim-quote check
-  + embedding cosine sanity. Thresholds are audited tunables.
+  + embedding cosine sanity. Thresholds are audited tunables. Extraction is
+  lossless-but-gated: every claim carries a `kind` — `definition`, `claim`,
+  `mechanism`, `example`, `caveat`, `actionable` (`mslearn/pipeline/
+  contracts.py`) — so mechanisms, caveats, and examples are captured as
+  their own gated claims instead of being dropped, but each still needs its
+  verbatim quote to pass the gate (`extract.max_claims` tunable caps claims
+  per chunk, default 15).
 - **Graph** (`mslearn/graph/store.py`): all Cypher lives here. Labels
-  `Source/Chunk/Claim/Concept`; edges `EXTRACTED_FROM/IN_CONCEPT/DEPENDS_ON/
+  `Source/Chunk/Claim/Concept`; `Claim.kind` persisted alongside the
+  existing fields; edges `EXTRACTED_FROM/IN_CONCEPT/DEPENDS_ON/
   CONFLICTS_WITH{classification}`; native vector indexes (768-dim).
 - **Pipeline** (`mslearn/pipeline/`): LangGraph extraction graph
   (extract→validate→retry→escalate), synthesis (vector-blocked clustering with
-  judge verdicts → conflict scan → Kahn topological curriculum).
+  judge verdicts → conflict scan → Kahn topological curriculum), and the
+  **guide generator** (`mslearn/pipeline/guide.py`, `guide_gen.py`) that
+  organizes a concept's trust-gated claims into a grounded, schema-validated
+  `StudyGuide` (TL;DR + sections + disagreements), dropping any item whose
+  model output loses its citation. On-demand flashcards/self-check
+  (`mslearn/pipeline/study_extras.py`) reuse the same claim set and grounding
+  rule.
 - **Workers** (`mslearn/worker/`): three dedicated Celery processes, one per
   queue (`prepare`, `extract`, `judge`) — synthesis can never occupy a
   prepare/extract slot, and the Whisper/memory-heavy prepare step can never
