@@ -73,7 +73,20 @@ def make_export_ctx(tmp_path, router=None):
     }
     graph.upsert_concept(ConceptRecord("k2", "Write through caching", "Persist before cache."))
     graph.set_concept_meta("k2", order_index=1)
-    graph.set_concept_teaching("k2", "## Cached Lesson\n\nUse the cached teaching markdown.")
+    graph.set_concept_teaching(
+        "k2",
+        json.dumps(
+            {
+                "concept_id": "k2",
+                "title": "Write through caching",
+                "tl_dr": {"text": "t", "claims": ["a"]},
+                "skeleton": [],
+                "sections": [],
+                "disagreements": [],
+                "open_questions": [],
+            }
+        ),
+    )
     return PipelineContext(
         settings=Settings(profiles_path=Path("profiles.yaml")),
         db=OpsDB(tmp_path / "ops.db"),
@@ -102,7 +115,10 @@ def test_export_markdown_is_deterministic_without_model_calls(tmp_path):
     assert "Freshness and load trade off." in markdown
     assert "[^1]: s1, blog, seq 1, paragraph 3, https://example.com/cache" in markdown
     cached = (tmp_path / "markdown" / "001-write-through-caching.md").read_text()
-    assert cached == "## Cached Lesson\n\nUse the cached teaching markdown.\n"
+    assert "tl_dr" not in cached
+    assert "{" not in cached
+    assert "# Write through caching" in cached
+    assert "## Key Claims" in cached
 
 
 def test_export_anki_writes_readable_package_with_stable_note_content(tmp_path):
