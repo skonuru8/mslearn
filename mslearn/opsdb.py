@@ -108,6 +108,14 @@ CREATE TABLE IF NOT EXISTS learner_memory (
 );
 CREATE INDEX IF NOT EXISTS idx_learner_memory_project
     ON learner_memory (project_id, created_ts);
+CREATE TABLE IF NOT EXISTS study_progress (
+  project_id TEXT NOT NULL,
+  concept_id TEXT NOT NULL,
+  section_id TEXT NOT NULL,
+  reviewed   INTEGER NOT NULL DEFAULT 0,
+  ts         REAL NOT NULL,
+  PRIMARY KEY (project_id, concept_id, section_id)
+);
 """
 
 DEFAULT_PROJECT_ID = "default"
@@ -128,6 +136,7 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "trust.quote_threshold": 90.0,
     "trust.embed_sim_threshold": 0.35,
     "extract.max_attempts": 2.0,
+    "extract.max_claims": 15.0,
     # 8192 was sized for hidden-reasoning overhead (Plan 09). With reasoning
     # disabled on every openrouter role (profiles.yaml), the budget only has
     # to cover the answer itself: measured extraction outputs over 656 live
@@ -153,6 +162,10 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     # not budget-starved, and notes are bounded by the trust-gated claims
     # supplied (typically well under this budget even written in full).
     "teach.max_tokens": 8192.0,
+    # Phase 3 study guide: organizes already-extracted claims into a
+    # structured StudyGuide JSON (no new facts, just restructuring) — same
+    # budget as teach.max_tokens since the input claim set is identical.
+    "guide.max_tokens": 8192.0,
     "evolve.max_tokens": 8192.0,
     # Image transcription output can be long (a dense screenshot / slide with
     # lots of text). The vision model is not a reasoning model, so this is a
@@ -816,6 +829,26 @@ class OpsDB:
     def delete_memory_item(self, memory_id: str) -> None:
         with self._lock, self.conn:
             self.conn.execute("DELETE FROM learner_memory WHERE memory_id = ?", (memory_id,))
+
+    def set_section_reviewed(
+        self, project_id: str, concept_id: str, section_id: str, reviewed: bool
+    ) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO study_progress(project_id,concept_id,section_id,reviewed,ts) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(project_id,concept_id,section_id) "
+                "DO UPDATE SET reviewed=excluded.reviewed, ts=excluded.ts",
+                (project_id, concept_id, section_id, 1 if reviewed else 0, time.time()),
+            )
+            self.conn.commit()
+
+    def section_progress(self, project_id: str, concept_id: str) -> dict[str, bool]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT section_id, reviewed FROM study_progress "
+                "WHERE project_id=? AND concept_id=?", (project_id, concept_id),
+            ).fetchall()
+        return {r["section_id"]: bool(r["reviewed"]) for r in rows}
 
 
 def _quiz_aggregate(concept_id: str, rows: list[dict]) -> dict:

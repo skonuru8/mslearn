@@ -36,10 +36,19 @@ class ExtractionState(TypedDict):
 def build_extraction_graph(router, db: OpsDB):
     max_attempts = int(db.get_tunable("extract.max_attempts"))
     max_tokens = int(db.get_tunable("extract.max_tokens"))
+    max_claims = int(db.get_tunable("extract.max_claims"))
     quote_threshold = db.get_tunable("trust.quote_threshold")
     embed_threshold = db.get_tunable("trust.embed_sim_threshold")
-    base_prompt = get_prompt(db, "extraction")
+    base_prompt = get_prompt(db, "extraction").format(max_claims=max_claims)
     retry_suffix = get_prompt(db, "extraction_retry_suffix")
+    # Escalating re-runs extraction under the "synthesis" role. When that
+    # role resolves to the SAME provider+model as "extraction" (e.g. the
+    # openrouter profile: both deepseek-v4-flash), escalation is a no-op
+    # that doubles calls/tokens for zero model change — skip the escalate
+    # edge entirely in that case. Computed once at build time (not per
+    # chunk): a profile switch is picked up on the next worker-process
+    # restart, same as every other tunable read here.
+    escalation_useful = not router.resolves_same("extraction", "synthesis")
 
     def extract(state: ExtractionState) -> dict:
         prompt = f"{base_prompt}\n\nCHUNK:\n{state['chunk_text']}"
@@ -81,6 +90,25 @@ def build_extraction_graph(router, db: OpsDB):
             }
         accepted = list(state["accepted"])
         seen = {d.text for d in accepted}
+
+        # Batch every trust-check embed for this validate() pass into ONE
+        # router.embed call instead of one call per draft — check_claim used
+        # to call embedder([draft.text, quote]) itself, every single draft,
+        # which at chunk volume was one network round trip per draft. Every
+        # draft's own text plus every distinct non-empty quote among them go
+        # into a single combined request; check_claim then gets its draft's
+        # text vector directly and looks its quote vector up from a small
+        # in-memory cache seeded by that same call (see quote_embedder
+        # below) — zero extra network calls, identical cosine math.
+        texts = [d.text for d in state["drafts"]]
+        quotes = sorted({d.quote.strip() for d in state["drafts"] if d.quote.strip()})
+        embeddings = router.embed(texts + quotes) if (texts or quotes) else []
+        claim_embeddings = dict(zip(texts, embeddings[: len(texts)]))
+        quote_vectors = dict(zip(quotes, embeddings[len(texts):]))
+
+        def quote_embedder(qs: list[str]) -> list[list[float]]:
+            return [quote_vectors[q] for q in qs]
+
         failing: list[dict] = []
         reasons: list[str] = []
         for draft in state["drafts"]:
@@ -90,7 +118,8 @@ def build_extraction_graph(router, db: OpsDB):
                 state["chunk_text"], draft,
                 quote_threshold=quote_threshold,
                 embed_sim_threshold=embed_threshold,
-                embedder=router.embed,
+                embedder=quote_embedder,
+                claim_embedding=claim_embeddings.get(draft.text),
             )
             if verdict.ok:
                 accepted.append(draft)
@@ -105,7 +134,7 @@ def build_extraction_graph(router, db: OpsDB):
             return "done"
         if state["attempt"] < max_attempts:
             return "retry"
-        if not state["escalated"]:
+        if not state["escalated"] and escalation_useful:
             return "escalate"
         return "done"
 
@@ -125,8 +154,11 @@ def build_extraction_graph(router, db: OpsDB):
     return builder.compile()
 
 
-def run_extraction(router, db: OpsDB, chunk_id: str, chunk_text: str) -> ExtractionState:
-    graph = build_extraction_graph(router, db)
+def run_extraction(graph, chunk_id: str, chunk_text: str) -> ExtractionState:
+    """Run extraction on a chunk through a graph built once per worker
+    process (see worker/context.py's `extraction_graph`) — recompiling the
+    StateGraph and re-reading every tunable on each chunk was pure per-chunk
+    overhead the graph structure and tunables don't need."""
     initial: ExtractionState = {
         "chunk_id": chunk_id, "chunk_text": chunk_text, "attempt": 0,
         "escalated": False, "drafts": [], "accepted": [], "rejected": [],

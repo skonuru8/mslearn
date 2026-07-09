@@ -4,6 +4,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from mslearn.adapters.base import make_source_id
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.contracts import derive_claim_id
+from mslearn.pipeline.extraction_graph import build_extraction_graph
 from mslearn.providers.base import ProviderTransientError
 from mslearn.worker import tasks as worker_tasks
 from mslearn.worker.app import app
@@ -43,7 +44,10 @@ def ctx(tmp_path):
     db.register_chunk_jobs("s1", ["s1:0"])
 
     def make(router):
-        context = PipelineContext(settings=None, db=db, router=router, graph=graph)
+        context = PipelineContext(
+            settings=None, db=db, router=router, graph=graph,
+            extraction_graph=build_extraction_graph(router, db),
+        )
         set_context(context)
         return context
 
@@ -67,7 +71,11 @@ def test_image_source_claims_get_image_observed_tier(tmp_path):
     )
     db.register_source("s1", ref="shot.png", role="spine", total_chunks=1)
     db.register_chunk_jobs("s1", ["s1:0"])
-    set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([GOOD]), graph=graph))
+    router = ScriptedRouter([GOOD])
+    set_context(PipelineContext(
+        settings=None, db=db, router=router, graph=graph,
+        extraction_graph=build_extraction_graph(router, db),
+    ))
     worker_tasks.extract_chunk_task.delay("default", "s1:0").get()
     (claim, _), = graph.claims.values()
     assert claim.trust == "image_observed"
@@ -98,6 +106,9 @@ def test_deleted_source_skips_extraction_with_one_info_line(ctx, caplog):
         def embed(self, texts):
             raise AssertionError("no embed calls for a deleted source")
 
+        def resolves_same(self, a, b):
+            return False
+
     context = ctx(NoCallRouter())
     context.db.delete_source("s1")
     with caplog.at_level(logging.INFO, logger="mslearn"):
@@ -124,7 +135,11 @@ def test_failure_monitor_pauses_source(ctx, tmp_path):
     db.register_source("s2", ref="r", role="spine", total_chunks=12)
     chunk_ids = [f"s2:{i}" for i in range(12)]
     db.register_chunk_jobs("s2", chunk_ids)
-    set_context(PipelineContext(settings=None, db=db, router=ScriptedRouter([]), graph=graph))
+    router = ScriptedRouter([])
+    set_context(PipelineContext(
+        settings=None, db=db, router=router, graph=graph,
+        extraction_graph=build_extraction_graph(router, db),
+    ))
     for cid in chunk_ids[:10]:  # min_chunks=10, threshold=0.5 — source pauses once failed/total > 0.5 with total>=10 (trips at the 7th failure; remaining iterations skip as paused)
         worker_tasks.extract_chunk_task.delay("default", cid).get()
     assert db.source_row("s2")["status"] == "paused"
@@ -141,7 +156,10 @@ def test_failure_monitor_trips_on_combined_failed_and_rejected(tmp_path):
     db.register_chunk_jobs("s3", chunk_ids)
     db.set_source_status("s3", "running")
     router = ScriptedRouter([BAD, BAD, BAD, BAD] * 5)  # plenty of gate-rejection responses
-    set_context(PipelineContext(settings=None, db=db, router=router, graph=graph))
+    set_context(PipelineContext(
+        settings=None, db=db, router=router, graph=graph,
+        extraction_graph=build_extraction_graph(router, db),
+    ))
     for cid in chunk_ids[:5]:  # missing from graph -> genuine failed
         worker_tasks.extract_chunk_task.delay("default", cid).get()
     assert db.source_row("s3")["status"] == "running"  # 5/12 problems, not over threshold yet
@@ -430,7 +448,7 @@ def test_hung_tasks_have_soft_and_hard_time_limits():
 def test_extract_chunk_soft_time_limit_marks_chunk_failed(ctx, monkeypatch):
     context = ctx(ScriptedRouter([]))
 
-    def boom(router, db, chunk_id, text):
+    def boom(graph, chunk_id, text):
         raise SoftTimeLimitExceeded()
 
     monkeypatch.setattr(worker_tasks, "run_extraction", boom)
@@ -641,10 +659,16 @@ def test_synthesize_task_start_clears_queued_marker(ctx, monkeypatch):
 
 def test_all_tasks_routed_to_consumed_queues():
     """An unrouted task lands in the default 'celery' queue, which no worker
-    consumes (dev_up.sh / make worker consume ingest,judge only) — the task
-    silently never runs. Every mslearn task must have an explicit route."""
-    consumed = {"ingest", "judge"}
+    consumes (dev_up.sh / make worker consume prepare,extract,judge only) —
+    the task silently never runs. Every mslearn task must have an explicit
+    route, and chunk_source/extract_chunk/synthesize must land on their own
+    dedicated queue (prepare/extract/judge respectively) — see plan
+    2026-07-06 Phase 4 (ingest throughput: prepare vs extract split)."""
     routes = app.conf.task_routes
+    assert routes["mslearn.worker.tasks.chunk_source_task"]["queue"] == "prepare"
+    assert routes["mslearn.worker.tasks.extract_chunk_task"]["queue"] == "extract"
+    assert routes["mslearn.worker.tasks.synthesize_task"]["queue"] == "judge"
+    consumed = {"prepare", "extract", "judge"}
     mslearn_tasks = [name for name in app.tasks if name.startswith("mslearn.")]
     assert mslearn_tasks, "task autodiscovery broken"
     for name in mslearn_tasks:

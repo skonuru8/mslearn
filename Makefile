@@ -1,4 +1,4 @@
-.PHONY: services services-down test check graph-test worker worker-judge serve run ui-build ui-test
+.PHONY: services services-down test check graph-test worker worker-prepare worker-extract worker-judge serve run ui-build ui-test
 
 serve:
 	.venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000
@@ -41,11 +41,23 @@ graph-test:
 	docker compose --profile test rm -sf neo4j-test
 
 # Dedicated per-queue workers: synthesis (judge) is a 10-minute reasoning run
-# that must never occupy an ingest slot and starve extraction — see
+# that must never occupy a prepare/extract slot — see
 # docs/superpowers/plans/2026-07-03-12-worker-isolation-and-synthesis-dedup.md.
-# Run both (e.g. two terminals, or `make run`) for the full app.
-worker:
-	.venv/bin/celery -A mslearn.worker.app worker -Q ingest --concurrency=2 -n ingest@%h -l info
+# prepare (chunk_source_task) and extract (extract_chunk_task) used to share
+# one "ingest" queue at prefork concurrency 2, sized for local Ollama.
+# Extraction runs on OpenRouter (fast remote API) and wants much higher
+# concurrency than the Whisper/memory-heavy prep step can safely run at, so
+# they're split onto their own queues — see
+# docs/superpowers/plans/2026-07-06-interactive-guide-and-throughput.md Phase 4.
+# Run all three (e.g. `make worker`, or `make run` for the full app).
+worker-prepare:
+	.venv/bin/celery -A mslearn.worker.app worker -Q prepare --concurrency=2 -n prepare@%h -l info
+
+worker-extract:
+	.venv/bin/celery -A mslearn.worker.app worker -Q extract --pool=threads --concurrency=$${MSL_EXTRACT_CONCURRENCY:-8} -n extract@%h -l info
 
 worker-judge:
 	.venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=1 -n judge@%h -l info
+
+worker: ## run all three ingest/judge workers (Ctrl-C stops all)
+	$(MAKE) -j3 worker-prepare worker-extract worker-judge

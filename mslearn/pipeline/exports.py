@@ -21,11 +21,7 @@ def export_markdown(ctx, out_dir: Path | str, project_id: str = "default") -> li
     for index, concept in enumerate(_curriculum(ctx.graph, project_id)):
         filename = f"{index:03d}-{_slug(concept['name'])}.md"
         path = out_dir / filename
-        teach_md = ctx.graph.get_concept(concept["concept_id"], project_id=project_id).get("teach_md", "")
-        if teach_md:
-            content = teach_md.rstrip() + "\n"
-        else:
-            content = _render_concept_markdown(ctx.graph, concept, project_id)
+        content = _render_concept_markdown(ctx.graph, concept, project_id)
         path.write_text(content)
         paths.append(path)
         index_lines.append(f"- [{concept['name']}]({filename})")

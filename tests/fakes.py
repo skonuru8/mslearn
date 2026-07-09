@@ -43,6 +43,11 @@ class ScriptedRouter:
             return [self.embeddings.pop(0) for _ in texts]
         return [[1.0, 0.0] for _ in texts]
 
+    def resolves_same(self, a, b):
+        # Default: roles resolve to DIFFERENT models, so escalation stays
+        # useful — matches every existing escalation test using this fake.
+        return False
+
 
 class InMemoryGraphStore:
     def __init__(
@@ -172,6 +177,7 @@ class InMemoryGraphStore:
         quote: str = "",
         chunk_id: str | None = None,
         project_id: str = "default",
+        kind: str = "claim",
     ) -> None:
         self.claims[claim_id] = {
             "claim_id": claim_id,
@@ -183,6 +189,7 @@ class InMemoryGraphStore:
             "quote": quote,
             "chunk_id": chunk_id,
             "project_id": project_id,
+            "kind": kind,
         }
         if spine_seq is not None:
             self.spine_seq[claim_id] = int(spine_seq)
@@ -195,6 +202,7 @@ class InMemoryGraphStore:
             record.claim_id, record.text, record.stance, record.source_id,
             list(embedding), trust=record.trust, quote=record.quote,
             chunk_id=record.chunk_id, project_id=project_id,
+            kind=getattr(record, "kind", "claim"),
         )
 
     def unassigned_trusted_claims(self, *, project_id: str = "default") -> list[dict]:
@@ -287,6 +295,7 @@ class InMemoryGraphStore:
                     "source_id": claim["source_id"],
                     "quote": claim.get("quote", ""),
                     "chunk_id": claim.get("chunk_id"),
+                    "kind": claim.get("kind", "claim"),
                 }
             )
         return sorted(rows, key=lambda r: r["claim_id"])
@@ -316,7 +325,11 @@ class InMemoryGraphStore:
     def conflicts_in_concept(self, concept_id: str, *, project_id: str = "default") -> list[dict]:
         members = {r["claim_id"] for r in self.claims_in_concept(concept_id, project_id=project_id)}
         rows = [
-            dict(v)
+            {
+                **v,
+                "text_a": self.claims.get(v["claim_a"], {}).get("text", ""),
+                "text_b": self.claims.get(v["claim_b"], {}).get("text", ""),
+            }
             for v in self.conflicts.values()
             if v["claim_a"] in members and v["claim_b"] in members
         ]
@@ -374,6 +387,7 @@ class InMemoryGraphStore:
             rows.append(
                 {
                     "claim_id": claim_id,
+                    "quote": claim.get("quote"),
                     "chunk_id": chunk.get("chunk_id"),
                     "source_id": chunk.get("source_id"),
                     "seq": chunk.get("seq"),

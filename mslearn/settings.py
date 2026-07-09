@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     # with Ollama on an 18 GB machine; transcription is serialized (see
     # SerializingTranscriber) so two ingest slots never load two at once.
     whisper_model: str = "small"
+    # Thread-pool concurrency for the `extract` queue (extract_chunk_task).
+    # Extraction is pure remote I/O (OpenRouter httpx) with no CPU-heavy local
+    # model, so threads — not prefork — fit: every wait releases the GIL.
+    # Should stay <= OLLAMA_NUM_PARALLEL, since the trust-check embed call
+    # still goes to local Ollama and would otherwise become the new
+    # bottleneck. Read by Makefile's worker-extract target via env
+    # (MSL_EXTRACT_CONCURRENCY); this field exists so code that wants the
+    # same value (not just the Makefile) has one source of truth.
+    extract_concurrency: int = 8
 
     @property
     def ops_db(self) -> Path:

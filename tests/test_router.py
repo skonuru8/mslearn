@@ -62,6 +62,22 @@ def test_profile_switch_changes_routing(env):
     assert resp.provider == "ollama"
 
 
+def test_resolves_same_true_when_openrouter_profile_shares_a_model(env):
+    # openrouter profile: extraction and synthesis both resolve to
+    # openrouter/deepseek-v4-flash — escalating to synthesis would be a
+    # no-op (see extraction_graph.build_extraction_graph).
+    cfg, db, fakes, router = env
+    assert router.resolves_same("extraction", "synthesis") is True
+
+
+def test_resolves_same_false_when_claude_code_profile_differs(env):
+    # claude-code profile: extraction is ollama/qwen3.5:9b, synthesis is
+    # claude_code/default — escalation is still useful there.
+    cfg, db, fakes, router = env
+    set_active_profile_name(db, cfg, "claude-code")
+    assert router.resolves_same("extraction", "synthesis") is False
+
+
 def test_success_and_failure_are_logged(env):
     cfg, db, fakes, router = env
     router.complete("interactive", request())

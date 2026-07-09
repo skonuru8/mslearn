@@ -1,3 +1,4 @@
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,37 @@ from mslearn.server.app import create_app
 from mslearn.settings import Settings
 from mslearn.worker.context import PipelineContext
 from tests.fakes import InMemoryGraphStore
+
+GUIDE_JSON = {
+    "concept_id": "k1",
+    "title": "Cache invalidation",
+    "tl_dr": {"text": "Cache invalidation is difficult.", "claims": ["c1"]},
+    "skeleton": ["Explanation"],
+    "sections": [
+        {
+            "id": "s1",
+            "title": "Explanation",
+            "items": [
+                {"kind": "claim", "text": "Cache invalidation is difficult.", "claims": ["c1"]},
+            ],
+        }
+    ],
+    "disagreements": [],
+    "open_questions": [],
+}
+
+FLASHCARDS_JSON = {
+    "cards": [
+        {"front": "Why is cache invalidation hard?", "back": "Cache invalidation is difficult.", "claims": ["c1"]},
+        {"front": "Unsupported filler", "back": "no source", "claims": []},
+    ]
+}
+
+SELFCHECK_JSON = {
+    "checks": [
+        {"question": "Why is cache invalidation hard?", "answer": "Cache invalidation is difficult.", "claims": ["c1"]},
+    ]
+}
 
 
 class TextRouter:
@@ -30,6 +62,30 @@ class TextRouter:
         )
 
 
+class JsonRouter:
+    """Serves queued JSON (`parsed`) responses in order — the study endpoints
+    (teach/flashcards/selfcheck) all make schema-constrained calls."""
+
+    def __init__(self, outputs: list[dict]):
+        self.outputs = list(outputs)
+        self.calls = []
+        self.requests = []
+
+    def complete(self, role, request):
+        self.calls.append(role)
+        self.requests.append(request)
+        out = self.outputs.pop(0)
+        return ModelResponse(
+            text="",
+            parsed=out,
+            input_tokens=1,
+            output_tokens=1,
+            latency_ms=1.0,
+            provider="fake",
+            model="m",
+        )
+
+
 class NoDelayTask:
     def __init__(self):
         self.count = 0
@@ -38,8 +94,7 @@ class NoDelayTask:
         self.count += 1
 
 
-@pytest.fixture()
-def study_client(tmp_path, monkeypatch):
+def _seed_graph() -> InMemoryGraphStore:
     graph = InMemoryGraphStore()
     graph.upsert_concept(
         ConceptRecord("k1", "Cache invalidation", "Know when cached values become stale.")
@@ -69,29 +124,38 @@ def study_client(tmp_path, monkeypatch):
         "start_s": None,
         "end_s": None,
     }
-    router = TextRouter(
-        "\n".join(
-            [
-                "## Explanation",
-                "Cache invalidation is difficult. [claim:c1]",
-                "## Worked example",
-                "Expire stale cache entries. [claim:c1]",
-                "## Common misconception",
-                "Caching still has freshness costs. [claim:c1]",
-            ]
-        )
-    )
-    ctx = PipelineContext(
-        settings=Settings(profiles_path=Path("profiles.yaml")),
-        db=OpsDB(tmp_path / "ops.db"),
-        router=router,
-        graph=graph,
-    )
-    task = NoDelayTask()
-    monkeypatch.setattr("mslearn.server.routers.study.synthesize_task", task)
-    app = create_app(context=ctx)
-    with TestClient(app) as client:
-        yield client, graph, router, task
+    return graph
+
+
+@pytest.fixture()
+def study_client_factory(tmp_path, monkeypatch):
+    """Factory fixture so individual tests can queue whatever JSON responses
+    the endpoints under test will consume (teach/flashcards/selfcheck each
+    make one schema-constrained model call)."""
+
+    with contextlib.ExitStack() as stack:
+
+        def _make(outputs: list[dict] | None = None):
+            graph = _seed_graph()
+            router = JsonRouter(outputs if outputs is not None else [dict(GUIDE_JSON)])
+            ctx = PipelineContext(
+                settings=Settings(profiles_path=Path("profiles.yaml")),
+                db=OpsDB(tmp_path / "ops.db"),
+                router=router,
+                graph=graph,
+            )
+            task = NoDelayTask()
+            monkeypatch.setattr("mslearn.server.routers.study.synthesize_task", task)
+            app = create_app(context=ctx)
+            client = stack.enter_context(TestClient(app))
+            return client, graph, router, task
+
+        yield _make
+
+
+@pytest.fixture()
+def study_client(study_client_factory):
+    yield study_client_factory()
 
 
 def test_curriculum_endpoint_returns_store_curriculum(study_client):
@@ -137,18 +201,22 @@ def test_concept_endpoint_returns_meta_claims_conflicts_and_citations(study_clie
     assert body["conflicts"] == []
     assert body["citations"][0]["claim_id"] == "c1"
     assert body["citations"][0]["page"] == 12
+    assert body["citations"][0]["quote"] == "Cache invalidation is one of the two hard problems"
 
 
-def test_teach_endpoint_returns_generated_markdown(study_client):
+def test_teach_returns_guide_and_progress(study_client):
     client, graph, router, _task = study_client
 
     response = client.get("/api/study/concepts/k1/teach")
 
     assert response.status_code == 200
-    assert response.json()["markdown"].startswith("## Explanation")
-    assert response.json()["cached"] is False
+    body = response.json()
+    assert "guide" in body and "sections" in body["guide"]
+    assert body["guide"]["title"] == "Cache invalidation"
+    assert body["cached"] is False
+    assert body["progress"] == {}
     assert router.calls == ["interactive"]
-    assert graph.get_concept("k1")["teach_md"].startswith("## Explanation")
+    assert graph.get_concept("k1")["teach_md"]
 
     # Second call hits the cache — no second model call, and the response
     # says so, so the UI can show a fast-path indicator instead of the
@@ -157,6 +225,49 @@ def test_teach_endpoint_returns_generated_markdown(study_client):
     assert cached_response.status_code == 200
     assert cached_response.json()["cached"] is True
     assert router.calls == ["interactive"]
+
+
+def test_progress_toggle_persists(study_client):
+    client, _graph, _router, _task = study_client
+    client.get("/api/study/concepts/k1/teach")
+
+    response = client.post(
+        "/api/study/concepts/k1/progress", json={"section_id": "s1", "reviewed": True}
+    )
+    assert response.status_code == 200
+    assert response.json() == {"progress": {"s1": True}}
+
+    body = client.get("/api/study/concepts/k1/teach").json()
+    assert body["progress"].get("s1") is True
+
+
+def test_flashcards_count_and_grounding(study_client_factory):
+    client, _graph, router, _task = study_client_factory(
+        outputs=[dict(GUIDE_JSON), dict(FLASHCARDS_JSON)]
+    )
+    client.get("/api/study/concepts/k1/teach")
+
+    response = client.post("/api/study/concepts/k1/flashcards", json={"count": 3})
+
+    assert response.status_code == 200
+    cards = response.json()["cards"]
+    assert len(cards) <= 3
+    assert all(c["claims"] for c in cards)
+    assert router.calls == ["interactive", "interactive"]
+
+
+def test_selfcheck_count_and_grounding(study_client_factory):
+    client, _graph, _router, _task = study_client_factory(
+        outputs=[dict(GUIDE_JSON), dict(SELFCHECK_JSON)]
+    )
+    client.get("/api/study/concepts/k1/teach")
+
+    response = client.post("/api/study/concepts/k1/selfcheck", json={"count": 5})
+
+    assert response.status_code == 200
+    checks = response.json()["checks"]
+    assert len(checks) <= 5
+    assert all(c["claims"] for c in checks)
 
 
 def test_flag_claim_rejects_dirties_clears_cache_and_enqueues(study_client):
@@ -173,9 +284,87 @@ def test_flag_claim_rejects_dirties_clears_cache_and_enqueues(study_client):
     assert task.count == 1
 
 
+def test_teach_reports_honest_cached_flag_when_cache_is_stale_markdown(study_client_factory):
+    # A concept whose teach_md holds pre-migration markdown (not JSON) and
+    # isn't dirty still triggers a real regeneration inside generate_guide's
+    # JSONDecodeError fallback — the endpoint must say cached=false, not
+    # blindly trust the pre-call teach_md presence check.
+    client, graph, router, _task = study_client_factory(outputs=[dict(GUIDE_JSON)])
+    graph.set_concept_teaching("k1", "## Explanation\nOld markdown lesson.")
+
+    response = client.get("/api/study/concepts/k1/teach")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cached"] is False
+    assert router.calls == ["interactive"]
+
+
+def test_flashcards_rejects_negative_count(study_client):
+    client, _graph, _router, _task = study_client
+    client.get("/api/study/concepts/k1/teach")
+
+    response = client.post("/api/study/concepts/k1/flashcards", json={"count": -1})
+
+    assert response.status_code == 422
+
+
+def test_selfcheck_rejects_zero_count(study_client):
+    client, _graph, _router, _task = study_client
+    client.get("/api/study/concepts/k1/teach")
+
+    response = client.post("/api/study/concepts/k1/selfcheck", json={"count": 0})
+
+    assert response.status_code == 422
+
+
+def test_flashcards_404s_on_keyerror_race_instead_of_500(study_client, monkeypatch):
+    # The concept exists at the pre-check but the generator itself raises
+    # KeyError (e.g. the concept was removed between the check and the
+    # generation call) — the endpoint must still 404, not 500.
+    client, _graph, _router, _task = study_client
+
+    def _raise(*_args, **_kwargs):
+        raise KeyError("unknown concept 'k1'")
+
+    monkeypatch.setattr("mslearn.server.routers.study.make_flashcards", _raise)
+
+    response = client.post("/api/study/concepts/k1/flashcards", json={"count": 3})
+
+    assert response.status_code == 404
+
+
+def test_selfcheck_404s_on_keyerror_race_instead_of_500(study_client, monkeypatch):
+    client, _graph, _router, _task = study_client
+
+    def _raise(*_args, **_kwargs):
+        raise KeyError("unknown concept 'k1'")
+
+    monkeypatch.setattr("mslearn.server.routers.study.make_selfcheck", _raise)
+
+    response = client.post("/api/study/concepts/k1/selfcheck", json={"count": 3})
+
+    assert response.status_code == 404
+
+
 def test_study_unknown_ids_404(study_client):
     client, _graph, _router, _task = study_client
 
     assert client.get("/api/study/concepts/nope").status_code == 404
     assert client.get("/api/study/concepts/nope/teach").status_code == 404
     assert client.post("/api/study/claims/nope/flag", json={"reason": "bad"}).status_code == 404
+
+
+def test_cross_project_concept_404(study_client):
+    client, _graph, _router, _task = study_client
+
+    assert client.get("/api/study/concepts/nope/teach").status_code == 404
+    assert client.post(
+        "/api/study/concepts/nope/progress", json={"section_id": "s1", "reviewed": True}
+    ).status_code == 404
+    assert client.post(
+        "/api/study/concepts/nope/flashcards", json={"count": 3}
+    ).status_code == 404
+    assert client.post(
+        "/api/study/concepts/nope/selfcheck", json={"count": 3}
+    ).status_code == 404

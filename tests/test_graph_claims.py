@@ -15,10 +15,10 @@ def seeded(clean_graph):
     return clean_graph, chunks
 
 
-def claim(cid, chunk_id, text="Cache invalidation is hard."):
+def claim(cid, chunk_id, text="Cache invalidation is hard.", kind="claim"):
     return ClaimRecord(claim_id=cid, chunk_id=chunk_id, source_id="srcA",
                        text=text, stance="neutral", quote="Invalidation is harder.",
-                       trust="trusted")
+                       trust="trusted", kind=kind)
 
 
 def unit_vec(idx, dim=768):
@@ -79,6 +79,26 @@ def test_delete_source_removes_data_and_dirties_shared_concepts(clean_graph):
     # untouched concept intact; other source's claim intact
     assert store.get_concept("k2") is not None
     assert [r["claim_id"] for r in store.claims_for_source("srcB")] == []  # chunk deleted with srcA
+
+
+def test_upsert_claim_roundtrips_kind(clean_graph):
+    store, chunks = seeded(clean_graph)
+    store.upsert_claim(claim("cl1", chunks[0].chunk_id, kind="caveat"), unit_vec(0))
+    store.upsert_claim(claim("cl2", chunks[0].chunk_id, "second claim"), unit_vec(1))  # default kind
+    rows = {r["claim_id"]: r for r in store.claims_for_source("srcA")}
+    assert rows["cl1"]["kind"] == "caveat"
+    assert rows["cl2"]["kind"] == "claim"
+
+
+def test_citations_for_claims_includes_quote(clean_graph):
+    store, chunks = seeded(clean_graph)
+    store.upsert_claim(claim("cl1", chunks[0].chunk_id), unit_vec(0))
+
+    rows = store.citations_for_claims(["cl1"])
+
+    assert len(rows) == 1
+    assert rows[0]["claim_id"] == "cl1"
+    assert rows[0]["quote"] == "Invalidation is harder."
 
 
 def test_delete_source_drops_empty_concepts(clean_graph):

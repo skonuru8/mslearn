@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useProject } from "../context/ProjectContext";
 
 export function ProjectSwitcher() {
   const { projectId, projects, loading, setProjectId, createProject, deleteProject } = useProject();
+  const navigate = useNavigate();
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -44,7 +46,10 @@ export function ProjectSwitcher() {
         <select
           value={projectId}
           disabled={loading || busy}
-          onChange={(event) => setProjectId(event.target.value)}
+          onChange={(event) => {
+            setProjectId(event.target.value);
+            navigate("/curriculum");
+          }}
           aria-label="Learning project"
         >
           {projects.map((row) => (

@@ -149,7 +149,8 @@ export interface ConflictRow {
 
 export interface CitationRow {
   claim_id: string;
-  source_id: string;
+  source_id?: string;
+  quote?: string | null;
   kind?: string | null;
   seq?: number | null;
   page?: number | null;
@@ -167,9 +168,65 @@ export interface ConceptDetail {
   citations: CitationRow[];
 }
 
+export interface GuideItem {
+  kind: string;
+  text: string;
+  claims: string[];
+}
+
+export interface GuideSection {
+  id: string;
+  title: string;
+  items: GuideItem[];
+}
+
+export interface DisagreeSide {
+  label: string;
+  text: string;
+  claims: string[];
+}
+
+export interface Disagreement {
+  summary: string;
+  classification: string;
+  a: DisagreeSide;
+  b: DisagreeSide;
+}
+
+export interface StudyGuide {
+  concept_id: string;
+  title: string;
+  tl_dr: { text: string; claims: string[] };
+  skeleton: string[];
+  sections: GuideSection[];
+  disagreements: Disagreement[];
+  open_questions: string[];
+}
+
 export interface TeachResponse {
-  markdown: string;
-  cached?: boolean;
+  guide: StudyGuide;
+  cached: boolean;
+  progress: Record<string, boolean>;
+}
+
+export interface FlashcardRow {
+  front: string;
+  back: string;
+  claims: string[];
+}
+
+export interface FlashcardsResponse {
+  cards: FlashcardRow[];
+}
+
+export interface SelfCheckRow {
+  question: string;
+  answer: string;
+  claims: string[];
+}
+
+export interface SelfCheckResponse {
+  checks: SelfCheckRow[];
 }
 
 export interface QuizNext {

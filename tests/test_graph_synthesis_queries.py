@@ -41,6 +41,11 @@ def test_conflict_pair_normalized(clean_graph):
     conflicts = store.conflicts_in_concept("k1")
     assert len(conflicts) == 1
     assert conflicts[0]["rationale"] == "second"
+    # Task 3.3: the guide generator's server-built disagreements need each
+    # conflict's two claim texts, not just ids — conflicts_in_concept must
+    # RETURN them directly (Cypher lives only in store.py).
+    assert conflicts[0]["text_a"] == "claim 0"
+    assert conflicts[0]["text_b"] == "claim 1"
 
 
 def test_concept_meta_and_curriculum(clean_graph):

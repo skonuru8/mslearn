@@ -47,6 +47,22 @@ class ModelRouter:
         role_cfg = profile.roles[role]
         return self._provider(role_cfg.provider), role_cfg
 
+    def resolves_same(self, role_a: str, role_b: str) -> bool:
+        """True when two roles resolve to the identical provider+model under
+        the active profile (e.g. openrouter's extraction/synthesis both being
+        deepseek-v4-flash). Used to skip no-op escalation in the extraction
+        graph: escalating to a role that resolves to the same model as the
+        one that just failed doubles cost for zero model change.
+
+        Looks up role configs directly rather than going through _resolve(),
+        which would construct (and, for openrouter, require an API key for)
+        providers just to compare names — comparison needs only the profile
+        config, not a live provider instance.
+        """
+        profile = self._cfg.profiles[get_active_profile_name(self._db, self._cfg)]
+        cfg_a, cfg_b = profile.roles[role_a], profile.roles[role_b]
+        return (cfg_a.provider, cfg_a.model) == (cfg_b.provider, cfg_b.model)
+
     def _merged(self, request: ModelRequest, role_cfg: RoleConfig) -> ModelRequest:
         if not role_cfg.params:
             return request

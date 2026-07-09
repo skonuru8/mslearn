@@ -210,7 +210,8 @@ class GraphStore:
             "MATCH (ch:Chunk {chunk_id: $chunk_id, project_id: $project_id}) "
             "MERGE (c:Claim {claim_id: $claim_id, project_id: $project_id}) "
             "SET c.text = $text, c.stance = $stance, c.quote = $quote, "
-            "c.trust = $trust, c.source_id = $source_id, c.embedding = $embedding "
+            "c.trust = $trust, c.source_id = $source_id, c.embedding = $embedding, "
+            "c.kind = $kind "
             "MERGE (c)-[:EXTRACTED_FROM]->(ch)",
             chunk_id=claim.chunk_id,
             project_id=project_id,
@@ -221,6 +222,7 @@ class GraphStore:
             trust=claim.trust,
             source_id=claim.source_id,
             embedding=embedding,
+            kind=getattr(claim, "kind", "claim"),
         )
 
     def claims_for_source(self, source_id: str, *, project_id: str = "default") -> list[dict]:
@@ -228,7 +230,7 @@ class GraphStore:
             "MATCH (c:Claim {source_id: $source_id, project_id: $project_id})"
             "-[:EXTRACTED_FROM]->(ch:Chunk {project_id: $project_id}) "
             "RETURN c.claim_id AS claim_id, c.text AS text, c.stance AS stance, "
-            "c.quote AS quote, c.trust AS trust, ch.chunk_id AS chunk_id "
+            "c.quote AS quote, c.trust AS trust, c.kind AS kind, ch.chunk_id AS chunk_id "
             "ORDER BY c.claim_id",
             source_id=source_id,
             project_id=project_id,
@@ -414,7 +416,7 @@ class GraphStore:
             "OPTIONAL MATCH (c)-[:EXTRACTED_FROM]->(ch:Chunk {project_id: $project_id}) "
             "RETURN c.claim_id AS claim_id, c.text AS text, c.stance AS stance, "
             "c.quote AS quote, c.trust AS trust, c.source_id AS source_id, "
-            "ch.chunk_id AS chunk_id ORDER BY c.claim_id",
+            "c.kind AS kind, ch.chunk_id AS chunk_id ORDER BY c.claim_id",
             concept_id=concept_id,
             project_id=project_id,
         )
@@ -426,6 +428,7 @@ class GraphStore:
             "(a)-[:IN_CONCEPT]->(k:Concept {concept_id: $concept_id, project_id: $project_id}), "
             "(b)-[:IN_CONCEPT]->(k) "
             "RETURN a.claim_id AS claim_a, b.claim_id AS claim_b, "
+            "a.text AS text_a, b.text AS text_b, "
             "r.classification AS classification, r.rationale AS rationale",
             concept_id=concept_id,
             project_id=project_id,
@@ -513,7 +516,7 @@ class GraphStore:
         return self.run_read(
             "MATCH (c:Claim {project_id: $project_id})-[:EXTRACTED_FROM]->(ch:Chunk {project_id: $project_id}) "
             "WHERE c.claim_id IN $claim_ids "
-            "RETURN c.claim_id AS claim_id, ch.chunk_id AS chunk_id, "
+            "RETURN c.claim_id AS claim_id, c.quote AS quote, ch.chunk_id AS chunk_id, "
             "ch.source_id AS source_id, ch.seq AS seq, ch.unit_index AS unit_index, "
             "ch.kind AS kind, ch.page AS page, ch.href AS href, ch.url AS url, "
             "ch.para_index AS para_index, ch.start_s AS start_s, ch.end_s AS end_s "

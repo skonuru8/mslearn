@@ -46,6 +46,28 @@ def test_embedding_sanity_check():
     assert any("similarity" in r for r in verdict.reasons)
 
 
+def test_check_claim_uses_precomputed_claim_embedding():
+    # extraction_graph.validate batches every draft's TEXT embedding into
+    # one call up front and hands each draft its own precomputed vector —
+    # check_claim must then only need to embed the quote (not re-embed the
+    # already-known draft.text), and the resulting similarity must be
+    # identical to the un-batched path.
+    calls = {"n": 0}
+
+    def spy_embedder(texts):
+        calls["n"] += 1
+        return [[1.0, 0.0] for _ in texts]
+
+    verdict = check_claim(
+        CHUNK, draft("Cache invalidation is one of the two hard problems"),
+        quote_threshold=90.0, embed_sim_threshold=0.35,
+        embedder=spy_embedder, claim_embedding=[1.0, 0.0],
+    )
+    assert verdict.ok
+    assert calls["n"] == 1  # only the quote needed embedding, not draft.text too
+    assert verdict.embed_sim == 1.0
+
+
 def test_verdict_frozen():
     import pytest
 
