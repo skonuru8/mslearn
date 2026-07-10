@@ -292,12 +292,21 @@ def extract_chunk_task(self, project_id: str, chunk_id: str):
     accepted = state["accepted"]
     try:
         if accepted:
-            embeddings = ctx.router.embed([d.text for d in accepted])
-            for draft, embedding in zip(accepted, embeddings):
+            # The trust gate in validate() already embedded every accepted
+            # claim's text once (see extraction_graph.claim_embeddings) —
+            # reuse those vectors instead of re-embedding here. Only texts
+            # that somehow aren't in the map (should be rare/never) get a
+            # single fallback embed call, batched together.
+            claim_embeddings = state.get("claim_embeddings", {})
+            missing_texts = [d.text for d in accepted if d.text not in claim_embeddings]
+            if missing_texts:
+                fresh = ctx.router.embed(missing_texts)
+                claim_embeddings = {**claim_embeddings, **dict(zip(missing_texts, fresh))}
+            for draft in accepted:
                 record = to_claim_record(
                     draft, chunk_id=chunk_id, source_id=chunk["source_id"], trust=trust
                 )
-                ctx.graph.upsert_claim(record, embedding, project_id=project_id)
+                ctx.graph.upsert_claim(record, claim_embeddings[draft.text], project_id=project_id)
     except SoftTimeLimitExceeded:
         _finalize_chunk(
             ctx, project_id, source_id, chunk_id, "failed",
