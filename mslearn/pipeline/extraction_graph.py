@@ -31,6 +31,7 @@ class ExtractionState(TypedDict):
     reasons: list[str]
     error: str | None
     parse_error: bool
+    claim_embeddings: dict[str, list[float]]
 
 
 def build_extraction_graph(router, db: OpsDB):
@@ -127,7 +128,18 @@ def build_extraction_graph(router, db: OpsDB):
             else:
                 failing.append({"draft": draft.model_dump(), "reasons": verdict.reasons})
                 reasons.extend(verdict.reasons)
-        return {"accepted": accepted, "rejected": failing, "reasons": reasons}
+        # Merge (not overwrite) across validate() passes: the retry loop can
+        # call validate() multiple times, and LangGraph's default TypedDict
+        # state update replaces a key's value rather than merging dicts —
+        # returning claim_embeddings alone here would drop vectors computed
+        # on earlier passes. accepted/rejected/reasons don't have this
+        # problem because they're already rebuilt from the full accumulated
+        # `accepted` list each pass.
+        merged_embeddings = {**state.get("claim_embeddings", {}), **claim_embeddings}
+        return {
+            "accepted": accepted, "rejected": failing, "reasons": reasons,
+            "claim_embeddings": merged_embeddings,
+        }
 
     def route(state: ExtractionState) -> str:
         if state["error"] is not None or not state["rejected"]:
@@ -163,5 +175,6 @@ def run_extraction(graph, chunk_id: str, chunk_text: str) -> ExtractionState:
         "chunk_id": chunk_id, "chunk_text": chunk_text, "attempt": 0,
         "escalated": False, "drafts": [], "accepted": [], "rejected": [],
         "reasons": [], "error": None, "parse_error": False,
+        "claim_embeddings": {},
     }
     return graph.invoke(initial)

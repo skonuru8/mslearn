@@ -148,6 +148,11 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     "monitor.min_chunks": 10.0,
     "synth.candidate_k": 8.0,
     "synth.similarity_floor": 0.75,
+    # Per-concept thread-pool width for process_dirty_concepts: each dirty
+    # concept makes up to 2 blocking model calls (conflict-scan, concept
+    # name), and concepts are independent, so this bounds how many run at
+    # once.
+    "synth.concurrency": 8.0,
     # Reasoning models (deepseek-v4-flash) can burn the whole completion
     # budget on hidden reasoning tokens before writing any answer text —
     # 2048 (base.py ModelRequest default) is not enough headroom. Mirrors

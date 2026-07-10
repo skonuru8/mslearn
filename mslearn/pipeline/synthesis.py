@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
+import threading
 import time
 from collections import defaultdict
 
@@ -167,6 +169,96 @@ def classify_conflict_pair(
     return None
 
 
+def _process_one_concept(
+    ctx,
+    concept_id: str,
+    *,
+    conflict_prompt: str,
+    name_prompt: str,
+    guidance: str,
+    project_id: str,
+) -> int:
+    """Run the conflict-scan (if >=2 claims) and concept-name model calls for
+    one concept, and apply their results to the graph. Returns the number of
+    conflict items dropped for THIS concept (no shared mutable counter —
+    callers sum these across concepts, which is what makes this safe to run
+    from multiple threads concurrently: each call only touches its own
+    concept_id in the graph)."""
+    graph = ctx.graph
+    db = ctx.db
+    drops = 0
+    claims = graph.claims_in_concept(concept_id, project_id=project_id)
+    claim_ids = {c["claim_id"] for c in claims}
+
+    if len(claims) >= 2:
+        response = ctx.router.complete(
+            "synthesis",
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role="user",
+                        content=_conflict_scan_prompt(
+                            conflict_prompt, concept_id, claims, guidance
+                        ),
+                    )
+                ],
+                json_schema=_CONFLICT_SCAN_SCHEMA,
+                max_tokens=int(db.get_tunable("synth.max_tokens")),
+            ),
+        )
+        parsed = response.parsed if isinstance(response.parsed, dict) else {}
+        for row in parsed.get("conflicts", []):
+            if not isinstance(row, dict):
+                continue
+            claim_a = row.get("claim_a")
+            claim_b = row.get("claim_b")
+            classification = row.get("classification")
+            rationale = row.get("rationale", "")
+            if claim_a == claim_b:
+                logger.warning("dropped %s: %s", "conflict", f"self-pair {claim_a!r}")
+                drops += 1
+                continue
+            if claim_a not in claim_ids or claim_b not in claim_ids:
+                logger.warning(
+                    "dropped %s: %s",
+                    "conflict",
+                    f"claim(s) not in concept {concept_id!r}: {claim_a!r}, {claim_b!r}",
+                )
+                drops += 1
+                continue
+            if classification not in CONFLICT_CLASSIFICATIONS:
+                logger.warning(
+                    "dropped %s: %s",
+                    "conflict",
+                    f"unknown classification {classification!r}",
+                )
+                drops += 1
+                continue
+            graph.add_conflict(claim_a, claim_b, classification, str(rationale), project_id=project_id)
+
+    name_response = ctx.router.complete(
+        "synthesis",
+        ModelRequest(
+            messages=[
+                ModelMessage(
+                    role="user", content=_concept_name_prompt(name_prompt, concept_id, claims)
+                )
+            ],
+            json_schema=_CONCEPT_NAME_SCHEMA,
+            max_tokens=int(db.get_tunable("synth.max_tokens")),
+        ),
+    )
+    parsed_name = name_response.parsed if isinstance(name_response.parsed, dict) else {}
+    graph.set_concept_meta(
+        concept_id,
+        name=str(parsed_name.get("name", "")),
+        summary=str(parsed_name.get("summary", "")),
+        project_id=project_id,
+    )
+    graph.mark_concept_dirty(concept_id, False, project_id=project_id)
+    return drops
+
+
 def process_dirty_concepts(ctx, project_id: str = "default") -> int:
     graph = ctx.graph
     db = ctx.db
@@ -176,90 +268,52 @@ def process_dirty_concepts(ctx, project_id: str = "default") -> int:
     name_prompt = get_prompt(db, "concept_name")
     profile = get_domain_profile(db, project_id)
     guidance = domain_guidance(profile)
-    drops = 0
 
-    for done, concept_id in enumerate(dirty_ids, start=1):
-        claims = graph.claims_in_concept(concept_id, project_id=project_id)
-        claim_ids = {c["claim_id"] for c in claims}
+    # Concepts are independent (each touches only its own graph nodes/edges)
+    # and this phase makes up to 2 blocking model calls per concept — the
+    # dominant cost of a 78-minute incident run — so fan the work out over a
+    # thread pool instead of a serial for-loop. `done` is a plain int guarded
+    # by `progress_lock` (not an atomic/shared counter passed into the
+    # helper) since it's the only piece of state genuinely shared across
+    # threads; drop counts come back as per-concept return values instead.
+    progress_lock = threading.Lock()
+    done = 0
 
-        if len(claims) >= 2:
-            response = ctx.router.complete(
-                "synthesis",
-                ModelRequest(
-                    messages=[
-                        ModelMessage(
-                            role="user",
-                            content=_conflict_scan_prompt(
-                                conflict_prompt, concept_id, claims, guidance
-                            ),
-                        )
-                    ],
-                    json_schema=_CONFLICT_SCAN_SCHEMA,
-                    max_tokens=int(db.get_tunable("synth.max_tokens")),
-                ),
-            )
-            parsed = response.parsed if isinstance(response.parsed, dict) else {}
-            for row in parsed.get("conflicts", []):
-                if not isinstance(row, dict):
-                    continue
-                claim_a = row.get("claim_a")
-                claim_b = row.get("claim_b")
-                classification = row.get("classification")
-                rationale = row.get("rationale", "")
-                if claim_a == claim_b:
-                    logger.warning("dropped %s: %s", "conflict", f"self-pair {claim_a!r}")
-                    drops += 1
-                    continue
-                if claim_a not in claim_ids or claim_b not in claim_ids:
-                    logger.warning(
-                        "dropped %s: %s",
-                        "conflict",
-                        f"claim(s) not in concept {concept_id!r}: {claim_a!r}, {claim_b!r}",
-                    )
-                    drops += 1
-                    continue
-                if classification not in CONFLICT_CLASSIFICATIONS:
-                    logger.warning(
-                        "dropped %s: %s",
-                        "conflict",
-                        f"unknown classification {classification!r}",
-                    )
-                    drops += 1
-                    continue
-                graph.add_conflict(claim_a, claim_b, classification, str(rationale), project_id=project_id)
-
-        name_response = ctx.router.complete(
-            "synthesis",
-            ModelRequest(
-                messages=[
-                    ModelMessage(
-                        role="user", content=_concept_name_prompt(name_prompt, concept_id, claims)
-                    )
-                ],
-                json_schema=_CONCEPT_NAME_SCHEMA,
-                max_tokens=int(db.get_tunable("synth.max_tokens")),
-            ),
-        )
-        parsed_name = name_response.parsed if isinstance(name_response.parsed, dict) else {}
-        graph.set_concept_meta(
+    def _run_and_report(concept_id: str) -> int:
+        nonlocal done
+        result = _process_one_concept(
+            ctx,
             concept_id,
-            name=str(parsed_name.get("name", "")),
-            summary=str(parsed_name.get("summary", "")),
+            conflict_prompt=conflict_prompt,
+            name_prompt=name_prompt,
+            guidance=guidance,
             project_id=project_id,
         )
-        graph.mark_concept_dirty(concept_id, False, project_id=project_id)
-
         # Per-concept progress so the UI can show "Analyzing topics... n of
         # m" instead of a bare spinner — this phase runs two model calls per
-        # concept and dominated the 78-minute incident run.
-        db.set_project_setting(
-            project_id,
-            "synthesis:progress",
-            json.dumps(
-                {"phase": "analyzing", "done": done, "total": total, "ts": int(time.time())},
-                sort_keys=True,
-            ),
-        )
+        # concept and dominated the 78-minute incident run. Guarded by
+        # progress_lock since multiple worker threads finish concurrently;
+        # exact ordering of `done` values across threads doesn't matter, only
+        # that it monotonically reaches `total`.
+        with progress_lock:
+            done += 1
+            db.set_project_setting(
+                project_id,
+                "synthesis:progress",
+                json.dumps(
+                    {"phase": "analyzing", "done": done, "total": total, "ts": int(time.time())},
+                    sort_keys=True,
+                ),
+            )
+        return result
+
+    drops = 0
+    if dirty_ids:
+        width = int(db.get_tunable("synth.concurrency"))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=width) as pool:
+            futures = [pool.submit(_run_and_report, concept_id) for concept_id in dirty_ids]
+            for future in concurrent.futures.as_completed(futures):
+                drops += future.result()
 
     if drops > 0:
         logger.warning("process_dirty_concepts: dropped %d conflict item(s) total", drops)

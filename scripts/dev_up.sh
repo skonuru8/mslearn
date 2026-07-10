@@ -82,7 +82,7 @@ echo "== starting Celery extract worker =="
 EXTRACT_WORKER_PID=$!
 
 echo "== starting Celery judge (synthesis) worker =="
-.venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=1 -n judge@%h -l warning &
+.venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=2 -n judge@%h -l warning &
 JUDGE_WORKER_PID=$!
 
 DIST_INDEX="frontend/dist/index.html"
