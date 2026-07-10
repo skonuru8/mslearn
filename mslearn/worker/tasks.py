@@ -1,5 +1,7 @@
+import concurrent.futures
 import json
 import logging
+import threading
 import time
 
 from celery.exceptions import SoftTimeLimitExceeded
@@ -9,6 +11,7 @@ from mslearn.adapters.registry import load_source
 from mslearn.chunking import chunk_source
 from mslearn.pipeline.contracts import to_claim_record
 from mslearn.pipeline.extraction_graph import run_extraction
+from mslearn.pipeline.guide_gen import generate_guide
 from mslearn.pipeline.synthesis import (
     build_curriculum,
     cluster_new_claims,
@@ -393,8 +396,9 @@ def synthesize_task(project_id: str = "default"):
         ctx.db.set_project_setting(project_id, "synthesis:running_since", "")
         ctx.db.set_project_setting(project_id, "synthesis:progress", "")
         raise
+    finish_ts = time.time()
     payload = {
-        "ts": int(time.time()),
+        "ts": int(finish_ts),
         "dirty_concepts": len(dirty),
         "processed_concepts": processed,
         "curriculum_len": len(ordered),
@@ -409,3 +413,57 @@ def synthesize_task(project_id: str = "default"):
         "synthesis done project=%s processed=%d curriculum=%d",
         project_id, processed, len(ordered),
     )
+    # Curriculum is built, so every concept's dirty/cached state is settled —
+    # fire the background warm pass so opening any topic in the UI is an
+    # instant cache hit instead of a cold model call. Guarded the same way as
+    # synthesis itself (try_mark_guides_queued single-flight) and only reached
+    # on the success path: a synthesis that raised above must never warm
+    # guides against a possibly-incomplete curriculum. Reuses finish_ts
+    # (already computed above) instead of a fresh time.time() call so this
+    # doesn't add an extra tick to the heartbeat's time.time() call count.
+    if ctx.db.try_mark_guides_queued(project_id, now=finish_ts):
+        warm_guides_task.delay(project_id)
+
+
+@app.task(name="mslearn.worker.tasks.warm_guides_task")
+def warm_guides_task(project_id: str = "default"):
+    """Pre-generate every concept's guide in parallel after synthesis.
+
+    generate_guide is idempotent (cache hit, no model call, for a non-dirty
+    concept), so this is safe to run any time and cheap to re-run. Each
+    concept's warm is independent and best-effort: one concept's model call
+    failing must never fail the whole pass (logged and skipped, mirroring
+    process_dirty_concepts' per-concept isolation), and the ThreadPoolExecutor
+    is sized by synth.concurrency like the other synthesis fan-outs.
+    """
+    ctx = get_context()
+    ctx.db.clear_guides_queued(project_id)
+    concepts = ctx.graph.all_concepts(project_id=project_id)
+    total = len(concepts)
+    if not total:
+        return 0
+    width = int(ctx.db.get_tunable("synth.concurrency"))
+    progress_lock = threading.Lock()
+    done = 0
+
+    def _warm(concept) -> None:
+        nonlocal done
+        cid = concept["concept_id"]
+        try:
+            generate_guide(ctx, cid, force=False, project_id=project_id)
+        except Exception:
+            logger.exception("guide warm failed for concept %s", cid)
+        with progress_lock:
+            done += 1
+            ctx.db.set_project_setting(
+                project_id,
+                "guides:progress",
+                json.dumps(
+                    {"phase": "warming", "done": done, "total": total, "ts": int(time.time())},
+                    sort_keys=True,
+                ),
+            )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=width) as pool:
+        list(pool.map(_warm, concepts))
+    return total

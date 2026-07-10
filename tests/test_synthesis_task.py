@@ -194,6 +194,45 @@ def test_synthesis_requests_carry_configured_max_tokens(tmp_path):
     assert all(req.max_tokens == 4096 for req in router.requests)
 
 
+def test_synthesize_task_enqueues_warm_guides_on_success(tmp_path, monkeypatch):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = FakeGraph({})
+    set_context(PipelineContext(settings=None, db=db, router=None, graph=graph))
+
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: set())
+    monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
+    monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+
+    calls = []
+    monkeypatch.setattr(
+        worker_tasks.warm_guides_task, "delay", lambda project_id: calls.append(project_id)
+    )
+
+    worker_tasks.synthesize_task.delay("default").get()
+
+    assert calls == ["default"]
+
+
+def test_synthesize_task_skips_warm_guides_on_failure(tmp_path, monkeypatch):
+    db = OpsDB(tmp_path / "ops.db")
+    graph = FakeGraph({})
+    set_context(PipelineContext(settings=None, db=db, router=None, graph=graph))
+
+    monkeypatch.setattr(
+        worker_tasks, "cluster_new_claims",
+        lambda c, p: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    calls = []
+    monkeypatch.setattr(
+        worker_tasks.warm_guides_task, "delay", lambda project_id: calls.append(project_id)
+    )
+
+    with pytest.raises(RuntimeError):
+        worker_tasks.synthesize_task.delay("default").get()
+
+    assert calls == []
+
+
 def test_process_dirty_concepts_writes_progress_per_concept(tmp_path):
     # The "analyzing" phase runs two model calls per concept and dominated
     # the 78-minute incident run — the UI needs "n of m", not a bare spinner.
