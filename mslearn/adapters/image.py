@@ -1,4 +1,5 @@
 import base64
+import io
 from pathlib import Path
 from typing import Callable
 
@@ -15,9 +16,41 @@ _MEDIA_TYPES = {
     ".heic": "image/heic",
 }
 
+# Formats every vision model we route to (OpenRouter qwen3-vl, offline
+# Ollama qwen2.5vl) can actually decode. Anything else (HEIC from iPhones,
+# BMP) must be re-encoded before it's sent, or the provider 400s.
+_REMOTE_SUPPORTED_MEDIA_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
 
 def media_type_for(path: Path) -> str:
     return _MEDIA_TYPES.get(path.suffix.lower(), "image/png")
+
+
+def normalize_for_vision(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
+    """Ensure image bytes are in a format vision models actually accept.
+
+    Formats already in `_REMOTE_SUPPORTED_MEDIA_TYPES` pass through untouched
+    (no re-encode, no quality loss, no wasted CPU). Anything else (HEIC, BMP,
+    ...) is decoded with Pillow and re-encoded as JPEG.
+    """
+    if media_type in _REMOTE_SUPPORTED_MEDIA_TYPES:
+        return image_bytes, media_type
+
+    try:
+        from pillow_heif import register_heif_opener
+
+        register_heif_opener()
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(image_bytes))
+        image = image.convert("RGB")
+        out = io.BytesIO()
+        image.save(out, format="JPEG", quality=90)
+        return out.getvalue(), "image/jpeg"
+    except Exception as exc:
+        raise ValueError(
+            f"could not decode image of media type {media_type!r} for vision normalization: {exc}"
+        ) from exc
 
 
 def _units_from_markdown(markdown: str, ref: str) -> list[StructuralUnit]:
@@ -54,6 +87,7 @@ def image_describe_via_router(router, db) -> Describe:
     from mslearn.providers.base import ModelMessage, ModelRequest
 
     def describe(image_bytes: bytes, media_type: str) -> str:
+        image_bytes, media_type = normalize_for_vision(image_bytes, media_type)
         data_url = f"data:{media_type};base64," + base64.b64encode(image_bytes).decode()
         request = ModelRequest(
             messages=[ModelMessage(

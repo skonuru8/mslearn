@@ -229,7 +229,9 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
   profile uses `qwen/qwen3-vl-32b-instruct` for this (deepseek models are
   text-only, so image reading routes to a dedicated vision model on the same
   key); offline uses a local `qwen2.5vl`
-  (needs `ollama pull qwen2.5vl:7b`).
+  (needs `ollama pull qwen2.5vl:7b`). Non-web formats (HEIC/BMP) are
+  auto-converted to JPEG before the vision call, since no vision model
+  reliably accepts them.
 - **Trust gate** (`mslearn/pipeline/trust.py`): rapidfuzz verbatim-quote check
   + embedding cosine sanity. Thresholds are audited tunables. Extraction is
   lossless-but-gated: every claim carries a `kind` — `definition`, `claim`,

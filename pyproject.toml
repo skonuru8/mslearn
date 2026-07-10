@@ -22,6 +22,8 @@ dependencies = [
     "uvicorn>=0.30",
     "genanki>=0.13",
     "python-multipart>=0.0.9",
+    "pillow>=10.0",
+    "pillow-heif>=0.16",
 ]
 
 [project.optional-dependencies]
