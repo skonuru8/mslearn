@@ -15,7 +15,7 @@ def test_defaults_registry_exact():
         "synth.candidate_k": 8.0,
         "synth.similarity_floor": 0.75,
         "synth.concurrency": 24.0,
-        "synth.match_batch": 8.0,
+        "synth.match_batch": 1.0,
         "synth.max_tokens": 8192.0,
         "chat.max_tokens": 8192.0,
         "quiz.max_tokens": 8192.0,

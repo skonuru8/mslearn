@@ -157,8 +157,10 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     # name), and concepts are independent, so this bounds how many run at
     # once.
     "synth.concurrency": 24.0,
-    # Anchors per batched concept_match call; 1 disables batching.
-    "synth.match_batch": 8.0,
+    # Anchors per batched concept_match call; 1 disables batching. Reserved
+    # for a future batched-clustering path (Task D) that is NOT implemented —
+    # kept at 1 (off) until a multi-anchor clustering eval exists to gate it.
+    "synth.match_batch": 1.0,
     # Reasoning models (deepseek-v4-flash) can burn the whole completion
     # budget on hidden reasoning tokens before writing any answer text —
     # 2048 (base.py ModelRequest default) is not enough headroom. Mirrors
