@@ -28,6 +28,7 @@ app.conf.update(
         "mslearn.worker.tasks.chunk_source_task": {"queue": "prepare"},
         "mslearn.worker.tasks.extract_chunk_task": {"queue": "extract"},
         "mslearn.worker.tasks.synthesize_task": {"queue": "judge"},
+        "mslearn.worker.tasks.warm_guides_task": {"queue": "judge"},
     },
 )
 app.autodiscover_tasks(["mslearn.worker"])

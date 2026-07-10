@@ -22,6 +22,57 @@ _CONCEPT_NAME_SCHEMA = {
 _CONCEPT_DEPS_SCHEMA = {"type": "object", "properties": {"edges": {"type": "array"}}}
 
 
+def _compute_anchor_matches(
+    ctx, anchor: dict, *, candidate_k: int, similarity_floor: float, prompt: str, project_id: str
+) -> tuple[str, list[dict], list[str], int]:
+    """Phase A worker: compute one anchor's candidates and (if any) the
+    model's match judgment for it. This is pure read + a single model call —
+    it never reads or writes claim/concept assignment state, so the result
+    for one anchor cannot be affected by what happens to any other anchor.
+    That is what makes it safe to run concurrently across anchors: the
+    candidate set only depends on embeddings/trust (fixed for the run) and
+    the match judgment only depends on (anchor, candidates). Returns
+    (anchor_id, candidates, matches, drops) so the caller can assemble the
+    per-anchor results dict and sum drop counts without any shared mutable
+    state.
+    """
+    anchor_id = anchor["claim_id"]
+    hits = ctx.graph.vector_search_claims(anchor["embedding"], k=candidate_k + 1, project_id=project_id)
+    candidates = [
+        h
+        for h in hits
+        if h["claim_id"] != anchor_id
+        and h["score"] >= similarity_floor
+        and h.get("trust") in {"trusted", "escalated", "image_observed"}
+    ]
+    if not candidates:
+        return anchor_id, [], [], 0
+
+    candidate_ids = [c["claim_id"] for c in candidates]
+    response = ctx.router.complete(
+        "synthesis",
+        ModelRequest(
+            messages=[
+                ModelMessage(
+                    role="user",
+                    content=_concept_match_prompt(prompt, anchor, candidates),
+                )
+            ],
+            json_schema=_CONCEPT_MATCH_SCHEMA,
+            max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
+        ),
+    )
+    parsed = response.parsed if isinstance(response.parsed, dict) else {}
+    raw_matches = parsed.get("matches", [])
+    matches = [claim_id for claim_id in raw_matches if claim_id in candidate_ids]
+    drops = 0
+    for dropped_id in raw_matches:
+        if dropped_id not in candidate_ids:
+            logger.warning("dropped %s: %s", "match", f"claim {dropped_id!r} not in candidate set")
+            drops += 1
+    return anchor_id, candidates, matches, drops
+
+
 def cluster_new_claims(ctx, project_id: str = "default") -> set[str]:
     graph = ctx.graph
     db = ctx.db
@@ -32,47 +83,55 @@ def cluster_new_claims(ctx, project_id: str = "default") -> set[str]:
     dirty: set[str] = set()
     drops = 0
 
-    for anchor in graph.unassigned_trusted_claims(project_id=project_id):
+    anchors = list(graph.unassigned_trusted_claims(project_id=project_id))
+
+    # Phase A: read-only, parallel. The blocking concept_match model call
+    # for a given anchor depends only on (anchor, its candidates) -- never
+    # on assignment state -- so all anchors' calls can run concurrently on a
+    # thread pool sized by synth.concurrency. This was the dominant per-run
+    # latency cost since each call blocks on the model. No assignment or
+    # dirty-marking happens here; drop counts come back as per-anchor return
+    # values (summed below in the main thread), not a shared counter, so
+    # there is nothing here that requires locking.
+    results: dict[str, tuple[list[dict], list[str]]] = {}
+    if anchors:
+        def _worker(anchor: dict) -> tuple[str, list[dict], list[str], int]:
+            return _compute_anchor_matches(
+                ctx,
+                anchor,
+                candidate_k=candidate_k,
+                similarity_floor=similarity_floor,
+                prompt=prompt,
+                project_id=project_id,
+            )
+
+        width = int(db.get_tunable("synth.concurrency"))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=width) as pool:
+            for anchor_id, candidates, matches, anchor_drops in pool.map(_worker, anchors):
+                results[anchor_id] = (candidates, matches)
+                drops += anchor_drops
+
+    # Phase B: serial, deterministic, no model calls. Same anchor order and
+    # same live graph.concept_id_of_claim reads as the old single-pass loop,
+    # so an anchor already swept into an earlier anchor's cluster (via the
+    # matched_unassigned bulk-assign below) is skipped here exactly as
+    # before -- only the (order-independent) model judgment was precomputed
+    # in Phase A; the mint/reuse/assign decisions and their ordering are
+    # unchanged, so the resulting claim->concept assignments are identical
+    # to the serial version.
+    for anchor in anchors:
         anchor_id = anchor["claim_id"]
         if graph.concept_id_of_claim(anchor_id, project_id=project_id) is not None:
             continue
 
-        hits = graph.vector_search_claims(anchor["embedding"], k=candidate_k + 1, project_id=project_id)
-        candidates = [
-            h
-            for h in hits
-            if h["claim_id"] != anchor_id
-            and h["score"] >= similarity_floor
-            and h.get("trust") in {"trusted", "escalated", "image_observed"}
-        ]
+        candidates, matches = results.get(anchor_id, ([], []))
+
         if not candidates:
             concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id], project_id=project_id)
             graph.assign_claim(anchor_id, concept_id, project_id=project_id)
             graph.mark_concept_dirty(concept_id, True, project_id=project_id)
             dirty.add(concept_id)
             continue
-
-        candidate_ids = [c["claim_id"] for c in candidates]
-        response = ctx.router.complete(
-            "synthesis",
-            ModelRequest(
-                messages=[
-                    ModelMessage(
-                        role="user",
-                        content=_concept_match_prompt(prompt, anchor, candidates),
-                    )
-                ],
-                json_schema=_CONCEPT_MATCH_SCHEMA,
-                max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
-            ),
-        )
-        parsed = response.parsed if isinstance(response.parsed, dict) else {}
-        raw_matches = parsed.get("matches", [])
-        matches = [claim_id for claim_id in raw_matches if claim_id in candidate_ids]
-        for dropped_id in raw_matches:
-            if dropped_id not in candidate_ids:
-                logger.warning("dropped %s: %s", "match", f"claim {dropped_id!r} not in candidate set")
-                drops += 1
 
         if not matches:
             concept_id = _mint_or_reuse_concept(graph, known_concepts, [anchor_id], project_id=project_id)
@@ -383,8 +442,7 @@ def build_curriculum(ctx, project_id: str = "default") -> list[str]:
         key=lambda cid: (all_concepts[cid].get("name", ""), cid),
     )
     ordered = ordered_spine + non_spine
-    for idx, concept_id in enumerate(ordered):
-        graph.set_concept_meta(concept_id, order_index=idx, project_id=project_id)
+    graph.set_concept_orders([(cid, idx) for idx, cid in enumerate(ordered)], project_id=project_id)
     return ordered
 
 

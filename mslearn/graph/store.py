@@ -553,6 +553,18 @@ class GraphStore:
             **params,
         )
 
+    def set_concept_orders(self, orders, *, project_id: str = "default") -> None:
+        """Write order_index for many concepts in one round-trip."""
+        if not orders:
+            return
+        rows = [{"concept_id": cid, "order_index": int(idx)} for cid, idx in orders]
+        self.run_write(
+            "UNWIND $rows AS row "
+            "MATCH (k:Concept {concept_id: row.concept_id, project_id: $project_id}) "
+            "SET k.order_index = row.order_index",
+            rows=rows, project_id=project_id,
+        )
+
     def all_concepts(self, *, project_id: str = "default") -> list[dict]:
         return self.run_read(
             "MATCH (k:Concept {project_id: $project_id}) "

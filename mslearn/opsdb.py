@@ -127,6 +127,10 @@ DEFAULT_PROJECT_ID = "default"
 # `synthesis:running_since` can't wedge synthesis forever.
 SYNTHESIS_QUEUED_TTL_S = 15 * 60
 SYNTHESIS_RUNNING_TTL_S = 30 * 60
+# TTL for the guide-warming enqueue dedup marker (try_mark_guides_queued): no
+# running-marker needed (unlike synthesis) since the queued marker plus
+# generate_guide's own idempotency are enough to prevent duplicate work.
+GUIDES_QUEUED_TTL_S = 3600
 
 
 def project_setting_key(project_id: str, key: str) -> str:
@@ -152,7 +156,11 @@ TUNABLE_DEFAULTS: dict[str, float] = {
     # concept makes up to 2 blocking model calls (conflict-scan, concept
     # name), and concepts are independent, so this bounds how many run at
     # once.
-    "synth.concurrency": 8.0,
+    "synth.concurrency": 24.0,
+    # Anchors per batched concept_match call; 1 disables batching. Reserved
+    # for a future batched-clustering path (Task D) that is NOT implemented —
+    # kept at 1 (off) until a multi-anchor clustering eval exists to gate it.
+    "synth.match_batch": 1.0,
     # Reasoning models (deepseek-v4-flash) can burn the whole completion
     # budget on hidden reasoning tokens before writing any answer text —
     # 2048 (base.py ModelRequest default) is not enough headroom. Mirrors
@@ -352,6 +360,42 @@ class OpsDB:
         """Called when a synthesis run actually starts (synthesize_task), so
         the next trigger after this run finishes is free to queue again."""
         self.delete_project_setting(project_id, "synthesis:queued")
+
+    def try_mark_guides_queued(self, project_id: str, *, now: float | None = None) -> bool:
+        """Atomically claim the right to enqueue a guide-warm run for `project_id`.
+
+        Mirrors try_mark_synthesis_queued but for guide-warming: collapses N
+        near-simultaneous triggers into at most one queued follow-up, returning
+        False when a fresh queued marker (< GUIDES_QUEUED_TTL_S) already
+        exists, True (and sets the queued marker) otherwise. No running-marker
+        needed (unlike synthesis) — the queued marker plus generate_guide's
+        own idempotency are enough to prevent duplicate work. Same atomic
+        transaction pattern as try_mark_synthesis_queued.
+        """
+        now = time.time() if now is None else now
+        queued_key = project_setting_key(project_id, "guides:queued")
+        with self._lock, self.conn:
+            queued_row = self.conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (queued_key,)
+            ).fetchone()
+            if queued_row and queued_row["value"]:
+                try:
+                    queued_ts = float(queued_row["value"])
+                except ValueError:
+                    queued_ts = 0.0
+                if now - queued_ts < GUIDES_QUEUED_TTL_S:
+                    return False
+            self.conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (queued_key, str(now)),
+            )
+            return True
+
+    def clear_guides_queued(self, project_id: str) -> None:
+        """Called when a guide-warm run actually starts, so the next trigger
+        after this run finishes is free to queue again."""
+        self.delete_project_setting(project_id, "guides:queued")
 
     def create_project(self, project_id: str, name: str) -> None:
         with self._lock, self.conn:
