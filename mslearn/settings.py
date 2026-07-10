@@ -23,9 +23,12 @@ class Settings(BaseSettings):
     # Thread-pool concurrency for the `extract` queue (extract_chunk_task).
     # Extraction is pure remote I/O (OpenRouter httpx) with no CPU-heavy local
     # model, so threads — not prefork — fit: every wait releases the GIL.
-    # Should stay <= OLLAMA_NUM_PARALLEL, since the trust-check embed call
-    # still goes to local Ollama and would otherwise become the new
-    # bottleneck. Read by Makefile's worker-extract target via env
+    # Extraction fires exactly one local Ollama embed per chunk (the
+    # redundant second trust-check embed was removed), so this should stay
+    # BALANCED with the Ollama server's OLLAMA_NUM_PARALLEL (both ~8) rather
+    # than <=: pushing extraction concurrency past what Ollama serves in
+    # parallel just moves the bottleneck to the embed queue instead of
+    # removing it. Read by Makefile's worker-extract target via env
     # (MSL_EXTRACT_CONCURRENCY); this field exists so code that wants the
     # same value (not just the Makefile) has one source of truth.
     extract_concurrency: int = 8

@@ -110,18 +110,28 @@ own queue:
   OpenRouter. `--pool=threads`, concurrency `MSL_EXTRACT_CONCURRENCY`
   (default 8) — threads fit because every wait (OpenRouter httpx, rapidfuzz,
   Neo4j bolt, Ollama embed httpx) releases the GIL.
-- `judge` (`synthesize_task`): synthesis, `--concurrency=1`. A pass can take
-  minutes of model reasoning; kept off the ingest queues so it can never
-  stall extraction.
+- `judge` (`synthesize_task`): synthesis, `--concurrency=2`. Synthesis now
+  parallelizes internally, runs the fast deepseek-flash model (not the old
+  reasoning model), and is single-flight per project (`try_mark_synthesis_
+  queued` guards it), so raising the ceiling above the old `1` is safe; it's
+  still kept off the ingest queues so it can never stall extraction.
 
 Splitting the queues means a slow Whisper transcription can't starve
 extraction's concurrency, and a synthesis run in flight never blocks a
 source that's still ingesting.
 
-> `MSL_EXTRACT_CONCURRENCY` should stay **≤ `OLLAMA_NUM_PARALLEL`**: the
-> trust-check embed call still goes to local Ollama, so pushing extraction
-> concurrency past what Ollama can serve in parallel just moves the
-> bottleneck there instead of removing it.
+> `MSL_EXTRACT_CONCURRENCY` should stay **balanced with `OLLAMA_NUM_PARALLEL`**
+> (both ~8): extraction fires exactly one local Ollama embed per chunk
+> (the trust-check call), so pushing extraction concurrency past what Ollama
+> serves in parallel just moves the bottleneck to the embed queue instead of
+> removing it.
+>
+> **Local embedding throughput.** Embeddings stay local on Ollama's
+> `nomic-embed-text`; to make ingestion fast, launch Ollama with
+> `OLLAMA_NUM_PARALLEL=8 OLLAMA_KEEP_ALIVE=30m ollama serve` (the long
+> keep-alive stops the embed model from being cold-reloaded between ingest
+> waves) and set `MSL_EXTRACT_CONCURRENCY=8` to match — one local embed per
+> chunk means the two should be equal.
 
 The first audio or caption-less-video ingest downloads a Whisper model;
 transcription is serialized (one at a time) to protect memory.
@@ -267,3 +277,24 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
   personalization only — an eval gate asserts no generated fact originates
   from memory. Any memory failure degrades to no personalization; it can
   never break an interactive endpoint.
+
+## Roadmap — deferred
+
+**Path B — instant availability (not yet built):**
+A source is usable today once its claim graph is built. A future change could
+make sources queryable from embeddings alone (defer reasoning to query time,
+NotebookLM-style):
+- Serve Q&A/search over raw chunk embeddings the moment ingestion embeds a
+  source, before extraction finishes — answers marked "from source
+  (unverified)" vs "from verified claims".
+- Populate the interactive guide progressively as claims/concepts land, with a
+  live "building study guide (n/m)" state.
+- Lazy/on-demand extraction for supplements (extract only when first opened).
+
+**In-process local embeddings (fastembed) — optional future speedup:**
+Embeddings currently go over HTTP to a local Ollama server. An optional
+alternative is an in-process ONNX embedder (`fastembed`) running the same
+`nomic-embed-text-v1.5` model (same 768-dim, no vector-index migration): no
+Ollama server, no HTTP round-trip, batched inference in the worker. Deferred —
+tune OLLAMA_NUM_PARALLEL first (above); adopt fastembed only if that isn't
+enough.

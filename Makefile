@@ -57,7 +57,7 @@ worker-extract:
 	.venv/bin/celery -A mslearn.worker.app worker -Q extract --pool=threads --concurrency=$${MSL_EXTRACT_CONCURRENCY:-8} -n extract@%h -l info
 
 worker-judge:
-	.venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=1 -n judge@%h -l info
+	.venv/bin/celery -A mslearn.worker.app worker -Q judge --concurrency=2 -n judge@%h -l info
 
 worker: ## run all three ingest/judge workers (Ctrl-C stops all)
 	$(MAKE) -j3 worker-prepare worker-extract worker-judge
