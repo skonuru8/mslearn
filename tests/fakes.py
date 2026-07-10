@@ -356,6 +356,15 @@ class InMemoryGraphStore:
         if order_index is not None:
             self.concepts[concept_id]["order_index"] = int(order_index)
 
+    def set_concept_orders(self, orders, *, project_id: str = "default") -> None:
+        for concept_id, order_index in orders:
+            if (
+                concept_id not in self.concepts
+                or self.concepts[concept_id].get("project_id", "default") != project_id
+            ):
+                continue
+            self.concepts[concept_id]["order_index"] = int(order_index)
+
     def get_concept(self, concept_id: str, *, project_id: str = "default") -> dict | None:
         concept = self.concepts.get(concept_id)
         if concept is not None and concept.get("project_id", "default") != project_id:

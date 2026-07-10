@@ -383,8 +383,7 @@ def build_curriculum(ctx, project_id: str = "default") -> list[str]:
         key=lambda cid: (all_concepts[cid].get("name", ""), cid),
     )
     ordered = ordered_spine + non_spine
-    for idx, concept_id in enumerate(ordered):
-        graph.set_concept_meta(concept_id, order_index=idx, project_id=project_id)
+    graph.set_concept_orders([(cid, idx) for idx, cid in enumerate(ordered)], project_id=project_id)
     return ordered
 
 
