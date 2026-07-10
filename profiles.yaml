@@ -14,12 +14,15 @@ profiles:
       interactive: {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
       evals:       {provider: openrouter, model: "deepseek/deepseek-v4-flash", params: {reasoning: {enabled: false}}}
       embedding:   {provider: ollama,     model: "nomic-embed-text"}
-      # Image reading. deepseek-v4-flash is TEXT-ONLY (probed 2026-07-06: adding
-      # an image part 404s; text works), so image ingestion goes to a genuinely
-      # multimodal model on the same OpenRouter key. gpt-4o-mini probed reading a
-      # text image correctly (~$0.0013/image) and handles dense/nested
-      # screenshots well. No reasoning param (not a reasoning model).
-      image:       {provider: openrouter, model: "openai/gpt-4o-mini"}
+      # Image reading. EVERY deepseek model is text-only (verified 2026-07-09
+      # against the live OpenRouter model list: v4-flash and v4-pro both report
+      # input=['text']; adding an image part 404s), so image ingestion needs a
+      # genuinely multimodal model on the same OpenRouter key. qwen3-vl-32b is a
+      # dedicated vision-language model with strong dense/screenshot OCR, cheaper
+      # than gpt-4o-mini ($0.10 vs $0.15/Mtok) and non-OpenAI. "instruct" (not a
+      # thinking model), so no reasoning param. Swap to google/gemini-2.5-flash-
+      # lite or mistralai/mistral-small-3.2-24b-instruct if preferred.
+      image:       {provider: openrouter, model: "qwen/qwen3-vl-32b-instruct"}
 
   claude-code:
     roles:

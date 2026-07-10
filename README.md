@@ -226,7 +226,9 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
   flows through the normal claim → concept → notes pipeline. Image-derived
   claims are labeled *from image* (an `image_observed` trust tier) because they
   are model-read, not verbatim quotes from an authored text. The openrouter
-  profile uses `openai/gpt-4o-mini` for this; offline uses a local `qwen2.5vl`
+  profile uses `qwen/qwen3-vl-32b-instruct` for this (deepseek models are
+  text-only, so image reading routes to a dedicated vision model on the same
+  key); offline uses a local `qwen2.5vl`
   (needs `ollama pull qwen2.5vl:7b`).
 - **Trust gate** (`mslearn/pipeline/trust.py`): rapidfuzz verbatim-quote check
   + embedding cosine sanity. Thresholds are audited tunables. Extraction is
