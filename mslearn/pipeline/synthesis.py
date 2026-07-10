@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from mslearn.graph.records import CONFLICT_CLASSIFICATIONS, ConceptRecord
 from mslearn.prompts import domain_guidance, get_domain_profile, get_prompt
-from mslearn.providers.base import ModelMessage, ModelRequest
+from mslearn.providers.base import ModelMessage, ModelRequest, ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +49,27 @@ def _compute_anchor_matches(
         return anchor_id, [], [], 0
 
     candidate_ids = [c["claim_id"] for c in candidates]
-    response = ctx.router.complete(
-        "synthesis",
-        ModelRequest(
-            messages=[
-                ModelMessage(
-                    role="user",
-                    content=_concept_match_prompt(prompt, anchor, candidates),
-                )
-            ],
-            json_schema=_CONCEPT_MATCH_SCHEMA,
-            max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
-        ),
-    )
+    try:
+        response = ctx.router.complete(
+            "synthesis",
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role="user",
+                        content=_concept_match_prompt(prompt, anchor, candidates),
+                    )
+                ],
+                json_schema=_CONCEPT_MATCH_SCHEMA,
+                max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
+            ),
+        )
+    except ProviderError:
+        # A malformed/truncated concept_match response (frequent with
+        # deepseek-v4-flash on large corpora) must not crash the whole
+        # clustering run -- degrade to "no match" for this anchor alone; it
+        # falls back to getting its own concept in Phase B.
+        logger.warning("concept_match call failed for anchor %s; degrading to no match", anchor_id)
+        return anchor_id, candidates, [], 0
     parsed = response.parsed if isinstance(response.parsed, dict) else {}
     raw_matches = parsed.get("matches", [])
     matches = [claim_id for claim_id in raw_matches if claim_id in candidate_ids]
@@ -250,72 +258,105 @@ def _process_one_concept(
     claim_ids = {c["claim_id"] for c in claims}
 
     if len(claims) >= 2:
-        response = ctx.router.complete(
+        try:
+            response = ctx.router.complete(
+                "synthesis",
+                ModelRequest(
+                    messages=[
+                        ModelMessage(
+                            role="user",
+                            content=_conflict_scan_prompt(
+                                conflict_prompt, concept_id, claims, guidance
+                            ),
+                        )
+                    ],
+                    json_schema=_CONFLICT_SCAN_SCHEMA,
+                    max_tokens=int(db.get_tunable("synth.max_tokens")),
+                ),
+            )
+        except ProviderError:
+            # A malformed/truncated conflict_scan response must not crash
+            # the whole synthesis run -- just skip conflict recording for
+            # this concept and keep going.
+            logger.warning("conflict_scan call failed for concept %s; skipping conflicts", concept_id)
+            response = None
+        if response is not None:
+            parsed = response.parsed if isinstance(response.parsed, dict) else {}
+            for row in parsed.get("conflicts", []):
+                if not isinstance(row, dict):
+                    continue
+                claim_a = row.get("claim_a")
+                claim_b = row.get("claim_b")
+                classification = row.get("classification")
+                rationale = row.get("rationale", "")
+                if claim_a == claim_b:
+                    logger.warning("dropped %s: %s", "conflict", f"self-pair {claim_a!r}")
+                    drops += 1
+                    continue
+                if claim_a not in claim_ids or claim_b not in claim_ids:
+                    logger.warning(
+                        "dropped %s: %s",
+                        "conflict",
+                        f"claim(s) not in concept {concept_id!r}: {claim_a!r}, {claim_b!r}",
+                    )
+                    drops += 1
+                    continue
+                if classification not in CONFLICT_CLASSIFICATIONS:
+                    logger.warning(
+                        "dropped %s: %s",
+                        "conflict",
+                        f"unknown classification {classification!r}",
+                    )
+                    drops += 1
+                    continue
+                graph.add_conflict(claim_a, claim_b, classification, str(rationale), project_id=project_id)
+
+    try:
+        name_response = ctx.router.complete(
             "synthesis",
             ModelRequest(
                 messages=[
                     ModelMessage(
-                        role="user",
-                        content=_conflict_scan_prompt(
-                            conflict_prompt, concept_id, claims, guidance
-                        ),
+                        role="user", content=_concept_name_prompt(name_prompt, concept_id, claims)
                     )
                 ],
-                json_schema=_CONFLICT_SCAN_SCHEMA,
+                json_schema=_CONCEPT_NAME_SCHEMA,
                 max_tokens=int(db.get_tunable("synth.max_tokens")),
             ),
         )
-        parsed = response.parsed if isinstance(response.parsed, dict) else {}
-        for row in parsed.get("conflicts", []):
-            if not isinstance(row, dict):
-                continue
-            claim_a = row.get("claim_a")
-            claim_b = row.get("claim_b")
-            classification = row.get("classification")
-            rationale = row.get("rationale", "")
-            if claim_a == claim_b:
-                logger.warning("dropped %s: %s", "conflict", f"self-pair {claim_a!r}")
-                drops += 1
-                continue
-            if claim_a not in claim_ids or claim_b not in claim_ids:
-                logger.warning(
-                    "dropped %s: %s",
-                    "conflict",
-                    f"claim(s) not in concept {concept_id!r}: {claim_a!r}, {claim_b!r}",
-                )
-                drops += 1
-                continue
-            if classification not in CONFLICT_CLASSIFICATIONS:
-                logger.warning(
-                    "dropped %s: %s",
-                    "conflict",
-                    f"unknown classification {classification!r}",
-                )
-                drops += 1
-                continue
-            graph.add_conflict(claim_a, claim_b, classification, str(rationale), project_id=project_id)
+    except ProviderError:
+        # A malformed/truncated concept_name response must not crash the
+        # run -- fall back to a deterministic name derived from the
+        # concept's claims below instead of the model's judgment.
+        logger.warning("concept_name call failed for concept %s; using fallback name", concept_id)
+        parsed_name: dict = {}
+    else:
+        parsed_name = name_response.parsed if isinstance(name_response.parsed, dict) else {}
 
-    name_response = ctx.router.complete(
-        "synthesis",
-        ModelRequest(
-            messages=[
-                ModelMessage(
-                    role="user", content=_concept_name_prompt(name_prompt, concept_id, claims)
-                )
-            ],
-            json_schema=_CONCEPT_NAME_SCHEMA,
-            max_tokens=int(db.get_tunable("synth.max_tokens")),
-        ),
-    )
-    parsed_name = name_response.parsed if isinstance(name_response.parsed, dict) else {}
+    name = str(parsed_name.get("name", "")).strip()
+    if not name:
+        name = _fallback_concept_name(claims)
     graph.set_concept_meta(
         concept_id,
-        name=str(parsed_name.get("name", "")),
+        name=name,
         summary=str(parsed_name.get("summary", "")),
         project_id=project_id,
     )
     graph.mark_concept_dirty(concept_id, False, project_id=project_id)
     return drops
+
+
+def _fallback_concept_name(claims: list[dict]) -> str:
+    """Deterministic name to use when the model gives nothing (empty name,
+    or the concept_name call failed entirely). Never the raw concept_id --
+    that's an internal id (e.g. "k-cl123"), not something a learner should
+    see in their study materials."""
+    if claims:
+        words = str(claims[0].get("text", "")).split()[:6]
+        candidate = " ".join(words).strip()
+        if candidate:
+            return candidate
+    return "Untitled concept"
 
 
 def process_dirty_concepts(ctx, project_id: str = "default") -> int:
@@ -393,46 +434,59 @@ def build_curriculum(ctx, project_id: str = "default") -> list[str]:
         if row["from_id"] in set(spine_ids) and row["to_id"] in set(spine_ids)
     }
     drops = 0
-    if len(spine_ids) >= 2:
+    # Skip the one-shot deps DAG call for very large spines: it reliably
+    # overflows max_tokens (hundreds of concepts) producing truncated JSON,
+    # is low quality even when it doesn't, and the topo-sort below falls
+    # back cleanly to natural (first_seq) spine order with no deps at all.
+    if 2 <= len(spine_ids) <= 60:
         prompt = get_prompt(db, "concept_deps")
-        response = ctx.router.complete(
-            "synthesis",
-            ModelRequest(
-                messages=[
-                    ModelMessage(
-                        role="user",
-                        content=_concept_deps_prompt(prompt, spine_ids, all_concepts),
+        try:
+            response = ctx.router.complete(
+                "synthesis",
+                ModelRequest(
+                    messages=[
+                        ModelMessage(
+                            role="user",
+                            content=_concept_deps_prompt(prompt, spine_ids, all_concepts),
+                        )
+                    ],
+                    json_schema=_CONCEPT_DEPS_SCHEMA,
+                    max_tokens=int(db.get_tunable("synth.max_tokens")),
+                ),
+            )
+        except ProviderError:
+            # A malformed/truncated concept_deps response must not crash
+            # the run -- skip adding edges; the topo-sort below falls back
+            # to natural spine order (deps stays as whatever was already
+            # persisted from a previous run, if any).
+            logger.warning("concept_deps call failed; falling back to natural spine order")
+            response = None
+        if response is not None:
+            parsed = response.parsed if isinstance(response.parsed, dict) else {}
+            for edge in parsed.get("edges", []):
+                if not isinstance(edge, dict):
+                    continue
+                from_id = edge.get("from_concept")
+                to_id = edge.get("to_concept")
+                if from_id not in first_seq or to_id not in first_seq:
+                    logger.warning(
+                        "dropped %s: %s",
+                        "edge",
+                        f"concept(s) not in spine: {from_id!r} -> {to_id!r}",
                     )
-                ],
-                json_schema=_CONCEPT_DEPS_SCHEMA,
-                max_tokens=int(db.get_tunable("synth.max_tokens")),
-            ),
-        )
-        parsed = response.parsed if isinstance(response.parsed, dict) else {}
-        for edge in parsed.get("edges", []):
-            if not isinstance(edge, dict):
-                continue
-            from_id = edge.get("from_concept")
-            to_id = edge.get("to_concept")
-            if from_id not in first_seq or to_id not in first_seq:
-                logger.warning(
-                    "dropped %s: %s",
-                    "edge",
-                    f"concept(s) not in spine: {from_id!r} -> {to_id!r}",
-                )
-                drops += 1
-                continue
-            if from_id == to_id:
-                logger.warning("dropped %s: %s", "edge", f"self-loop on {from_id!r}")
-                drops += 1
-                continue
-            if not _acyclic_add(deps, (from_id, to_id)):
-                logger.warning(
-                    "dropped %s: %s", "edge", f"cycle detected {from_id!r} -> {to_id!r}"
-                )
-                drops += 1
-            else:
-                graph.add_depends_on(from_id, to_id, project_id=project_id)
+                    drops += 1
+                    continue
+                if from_id == to_id:
+                    logger.warning("dropped %s: %s", "edge", f"self-loop on {from_id!r}")
+                    drops += 1
+                    continue
+                if not _acyclic_add(deps, (from_id, to_id)):
+                    logger.warning(
+                        "dropped %s: %s", "edge", f"cycle detected {from_id!r} -> {to_id!r}"
+                    )
+                    drops += 1
+                else:
+                    graph.add_depends_on(from_id, to_id, project_id=project_id)
 
     if drops > 0:
         logger.warning("build_curriculum: dropped %d edge(s) total", drops)

@@ -178,6 +178,29 @@ class _TrackingRouter:
                 self._in_flight -= 1
 
 
+def test_cluster_survives_bad_match_response(tmp_path):
+    # A truncated/malformed concept_match response (e.g. deepseek-v4-flash
+    # overflowing max_tokens on a large corpus) must not crash clustering --
+    # the anchor should just fall back to getting its own concept instead of
+    # taking down the whole synthesis run.
+    from mslearn.providers.base import ProviderBadOutputError
+
+    graph = InMemoryGraphStore()
+    graph.add_claim("cl1", "cache ttl", "neutral", "s1", [1.0, 0.0, 0.0])
+    graph.add_claim("cl2", "cache expiry", "neutral", "s1", [0.99, 0.01, 0.0])
+    ctx, router = make_ctx(
+        tmp_path,
+        graph,
+        [ProviderBadOutputError("truncated"), ProviderBadOutputError("truncated")],
+    )
+
+    dirty = cluster_new_claims(ctx)
+
+    assert graph.concept_id_of_claim("cl1") is not None
+    assert graph.concept_id_of_claim("cl2") is not None
+    assert dirty
+
+
 def test_cluster_new_claims_runs_calls_in_parallel(tmp_path):
     # Two independent near-duplicate pairs -- (c1, c2) and (c3, c4) -- each
     # only a mutual candidate within its own pair, so all 4 anchors get a
