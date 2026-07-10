@@ -24,6 +24,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pillow>=10.0",
     "pillow-heif>=0.16",
+    "json-repair>=0.30",
 ]
 
 [project.optional-dependencies]

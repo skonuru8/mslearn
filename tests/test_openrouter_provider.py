@@ -65,6 +65,38 @@ def test_bad_json_with_schema_raises():
 
 
 @respx.mock
+def test_complete_salvages_malformed_json():
+    # deepseek-v4-flash occasionally emits JSON with unescaped inner quotes.
+    # json-repair should recover a usable dict instead of us raising.
+    body = {
+        "choices": [
+            {
+                "message": {"content": '{"claims": [{"text": "a" "b", "kind": "claim"}]}'},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {},
+    }
+    respx.post(URL).respond(json=body)
+    resp = OpenRouterProvider("k").complete("m", req({"type": "object"}))
+    assert isinstance(resp.parsed, dict)
+    assert "claims" in resp.parsed
+
+
+@respx.mock
+def test_complete_still_raises_on_unsalvageable():
+    body = {
+        "choices": [
+            {"message": {"content": "not json at all <<<"}, "finish_reason": "stop"}
+        ],
+        "usage": {},
+    }
+    respx.post(URL).respond(json=body)
+    with pytest.raises(ProviderBadOutputError):
+        OpenRouterProvider("k").complete("m", req({"type": "object"}))
+
+
+@respx.mock
 def test_truncated_json_error_carries_finish_reason():
     # The user's exact symptom: a reasoning model truncates mid-JSON
     # (finish_reason=length), producing degenerate content like
