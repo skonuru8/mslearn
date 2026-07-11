@@ -192,6 +192,39 @@ def test_quiz_question_excludes_rejected_claims(tmp_path):
     assert "[claim:c1]" in prompt
 
 
+def test_quiz_question_rejects_ungrounded_expected_points(tmp_path):
+    # Model answers from its own knowledge — no expected point cites a claim
+    # that belongs to this concept. The grounding gate must reject it.
+    from mslearn.pipeline.quiz import generate_question
+
+    router = CapturingScriptedRouter(
+        [{"question": "Why TTL?", "expected_points": ["TTLs are a general caching idea."]}]
+    )
+    ctx = make_ctx(tmp_path, router)
+    with pytest.raises(ProviderBadOutputError):
+        generate_question(ctx, "k1", session_id="sess-x")
+
+
+def test_quiz_question_drops_only_ungrounded_points_keeps_grounded(tmp_path):
+    from mslearn.pipeline.quiz import generate_question
+
+    router = CapturingScriptedRouter(
+        [
+            {
+                "question": "Why TTL?",
+                "expected_points": [
+                    "Ungrounded general fact.",
+                    "TTL bounds stale data [claim:c1].",
+                    "Cites a claim from another concept [claim:c2].",
+                ],
+            }
+        ]
+    )
+    ctx = make_ctx(tmp_path, router)
+    result = generate_question(ctx, "k1", session_id="sess-y")
+    assert result["expected_points"] == ["TTL bounds stale data [claim:c1]."]
+
+
 def test_quiz_next_prefers_recent_failures_before_unquizzed_concepts(tmp_path):
     router = CapturingScriptedRouter(
         [
@@ -328,11 +361,13 @@ def test_quiz_next_degrades_gracefully_when_memory_search_raises(tmp_path):
     # Memory is advisory/personalization-only: a broken backend must not
     # break quiz sequencing.
     memory = RaisingLearnerMemory()
+    # next_concept picks k2 (a recorded failure), so the question must be
+    # grounded in k2's own claim (c2), not k1's.
     router = CapturingScriptedRouter(
         [
             {
-                "question": "Why does a TTL reduce stale-cache risk?",
-                "expected_points": ["TTL bounds how long stale cached data can survive [claim:c1]."],
+                "question": "Why persist writes before updating the cache?",
+                "expected_points": ["Write-through persists data before updating cache [claim:c2]."],
             }
         ]
     )

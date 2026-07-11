@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from mslearn.prompts import get_prompt
@@ -10,6 +11,21 @@ from mslearn.providers.base import ModelMessage, ModelRequest, ProviderBadOutput
 logger = logging.getLogger(__name__)
 
 _TRUSTED = frozenset({"trusted", "escalated", "image_observed"})
+_CLAIM_RE = re.compile(r"\[claim:([^\]\s]+)\]")
+
+
+def _grounded_points(expected_points: list[str], valid_ids: set[str]) -> list[str]:
+    """Keep only expected points that cite at least one claim id belonging to
+    this concept. A point with no citation, or only citations to claim ids
+    outside the concept, is the model leaning on its own (ungrounded) knowledge
+    rather than the project's source — drop it. This is the quiz analogue of
+    the guide's drop_ungrounded gate."""
+    grounded: list[str] = []
+    for point in expected_points:
+        cited = set(_CLAIM_RE.findall(point))
+        if cited & valid_ids:
+            grounded.append(point)
+    return grounded
 
 _QUESTION_SCHEMA = {
     "type": "object",
@@ -94,9 +110,19 @@ def generate_question(ctx, concept_id: str, session_id: str, project_id: str = "
     expected_points = parsed.get("expected_points")
     if not question or not isinstance(expected_points, list) or not expected_points:
         raise ProviderBadOutputError("invalid quiz_question schema: question and expected_points required")
+    valid_ids = {str(c["claim_id"]) for c in claims}
+    grounded = _grounded_points([str(point) for point in expected_points], valid_ids)
+    if not grounded:
+        # Every expected point was ungrounded (no citation to a claim in this
+        # concept) — the model answered from its own knowledge, not the
+        # project's source. Reject so the router retries/degrades instead of
+        # serving an internet-knowledge quiz.
+        raise ProviderBadOutputError(
+            "quiz_question not grounded: no expected point cites a project claim"
+        )
     result = {
         "question": question,
-        "expected_points": [str(point) for point in expected_points],
+        "expected_points": grounded,
     }
     ctx.db.set_setting(_pending_key(session_id, concept_id), json.dumps(result))
     return result
