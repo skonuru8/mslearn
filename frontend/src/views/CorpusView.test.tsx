@@ -1,9 +1,18 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CorpusView } from "./CorpusView";
+import { uploadSource } from "../api/client";
 import { corpusHandlers, installFetchMock } from "../test/fetchMock";
 import { renderWithProviders } from "../test/renderWithProviders";
+
+vi.mock("../api/client", async () => {
+  const actual = await vi.importActual<typeof import("../api/client")>("../api/client");
+  return {
+    ...actual,
+    uploadSource: vi.fn(),
+  };
+});
 
 describe("CorpusView", () => {
   it("posts add-link payload and shows new row", async () => {
@@ -242,6 +251,57 @@ describe("CorpusView", () => {
     expect(radios[0]!.checked).toBe(false);
     expect(radios[1]!.checked).toBe(true);
     expect(radios[2]!.checked).toBe(false);
+  });
+
+  it("uploads multiple files concurrently with per-file roles", async () => {
+    const fetchMock = installFetchMock(corpusHandlers([]));
+    const calls: Array<{ name: string; role: string }> = [];
+    const resolvers: Array<(value: { source_id: string; stored_path: string }) => void> = [];
+    vi.mocked(uploadSource).mockImplementation((file, role) => {
+      calls.push({ name: file.name, role });
+      return new Promise((resolve) => {
+        resolvers.push(resolve);
+      });
+    });
+
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(["a"], "one.pdf", { type: "application/pdf" }),
+      new File(["b"], "two.pdf", { type: "application/pdf" }),
+    ];
+    await userEvent.upload(input, files);
+    await screen.findByText(/which of these is your main source/i);
+    const radios = screen.getAllByRole("radio");
+    await userEvent.click(radios[1]!);
+
+    await userEvent.click(screen.getByRole("button", { name: "Add 2 files" }));
+
+    // Both uploads must be in flight before either resolves — proves
+    // concurrency, not a sequential await-per-file loop.
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(resolvers).toHaveLength(2);
+    expect(calls).toEqual([
+      { name: "one.pdf", role: "supplement" },
+      { name: "two.pdf", role: "spine" },
+    ]);
+
+    const sourceGetCallsBefore = fetchMock.mock.calls.filter(([url, init]: [string, RequestInit?]) => {
+      const path = url.startsWith("http") ? new URL(url).pathname : url;
+      return path === "/api/corpus/sources" && init?.method === undefined;
+    }).length;
+
+    resolvers.forEach((resolve) => resolve({ source_id: "s-new", stored_path: "/tmp/x" }));
+
+    await waitFor(() => {
+      const after = fetchMock.mock.calls.filter(([url, init]: [string, RequestInit?]) => {
+        const path = url.startsWith("http") ? new URL(url).pathname : url;
+        return path === "/api/corpus/sources" && init?.method === undefined;
+      }).length;
+      expect(after).toBeGreaterThan(sourceGetCallsBefore);
+    });
   });
 
   it("shows error banner on 422 ingest", async () => {

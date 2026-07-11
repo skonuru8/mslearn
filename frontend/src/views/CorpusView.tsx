@@ -76,7 +76,6 @@ export function CorpusView() {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [mainSourceIndex, setMainSourceIndex] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [uploadIndex, setUploadIndex] = useState<{ current: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
@@ -230,6 +229,16 @@ export function CorpusView() {
     }
   }
 
+  function roleFor(i: number): string {
+    return uploadFiles.length > 1
+      ? i === mainSourceIndex
+        ? "spine"
+        : "supplement"
+      : isMainCourse
+        ? "spine"
+        : "supplement";
+  }
+
   async function onUpload(event: FormEvent) {
     event.preventDefault();
     if (uploadFiles.length === 0) {
@@ -237,21 +246,24 @@ export function CorpusView() {
       return;
     }
     setUploading(true);
-    const failed: string[] = [];
-    // Upload sequentially so per-file progress stays meaningful and one
-    // failure doesn't abort the rest of the batch.
-    for (let i = 0; i < uploadFiles.length; i += 1) {
-      const file = uploadFiles[i]!;
-      setUploadIndex({ current: i + 1, total: uploadFiles.length });
-      setUploadPercent(0);
-      try {
-        await uploadSource(file, role, false, (percent) => setUploadPercent(percent));
-      } catch {
-        failed.push(file.name);
-      }
-    }
+    let completed = 0;
+    setUploadIndex({ current: 0, total: uploadFiles.length });
+    // Upload concurrently — the backend/worker already fans out chunk
+    // processing in parallel, so there's no benefit to a client-side queue.
+    const results = await Promise.allSettled(
+      uploadFiles.map((file, i) =>
+        uploadSource(file, roleFor(i), false).then((r) => {
+          completed += 1;
+          setUploadIndex({ current: completed, total: uploadFiles.length });
+          return r;
+        }),
+      ),
+    );
+    const failed = uploadFiles
+      .filter((_, i) => results[i]!.status === "rejected")
+      .map((f) => f.name);
     setUploadFiles([]);
-    setUploadPercent(null);
+    setMainSourceIndex(null);
     setUploadIndex(null);
     spineTouched.current = false;
     await refreshSources();
@@ -464,13 +476,11 @@ export function CorpusView() {
                 <p className="hint">{uploadFiles.length} files selected</p>
               ) : null}
             </div>
-            {uploadPercent !== null ? (
+            {uploadIndex !== null ? (
               <div className="upload-progress">
-                <progress max={100} value={uploadPercent} />
+                <progress max={uploadIndex.total} value={uploadIndex.current} />
                 <span>
-                  {uploadIndex && uploadIndex.total > 1
-                    ? `Uploading file ${uploadIndex.current} of ${uploadIndex.total}… ${uploadPercent}%`
-                    : `Uploading… ${uploadPercent}%`}
+                  Uploading {uploadIndex.total} files… ({uploadIndex.current} of {uploadIndex.total} done)
                 </span>
               </div>
             ) : null}
