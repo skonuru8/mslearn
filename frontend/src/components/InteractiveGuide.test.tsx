@@ -98,11 +98,11 @@ describe("InteractiveGuide", () => {
     expect(screen.getByText("Position B")).toBeInTheDocument();
   });
 
-  it("renders open questions in a visually-distinct advisory box", () => {
+  it("never renders open questions, even when the (legacy-cached) guide has them", () => {
     const guide = baseGuide({ open_questions: ["Does this hold for linked lists?"] });
     render(<InteractiveGuide guide={guide} progress={{}} citations={[]} onToggleSection={() => {}} />);
-    expect(screen.getByText(/open questions/i)).toBeInTheDocument();
-    expect(screen.getByText("Does this hold for linked lists?")).toBeInTheDocument();
+    expect(screen.queryByText(/open questions/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Does this hold for linked lists?")).not.toBeInTheDocument();
   });
 
   it("calls onToggleSection when the reviewed checkbox is toggled", async () => {
@@ -115,22 +115,22 @@ describe("InteractiveGuide", () => {
     expect(onToggleSection).toHaveBeenCalledWith("s1", true);
   });
 
-  it("renders the labeled interpretation block", () => {
+  it("never renders the interpretation block, even when the (legacy-cached) guide has one", () => {
     const guide = baseGuide({
       interpretation: [
         { angle: "verdict", text: "This holds only for short horizons.", claims: ["k-abc123"] },
       ],
     });
     render(<InteractiveGuide guide={guide} progress={{}} citations={[]} onToggleSection={() => {}} />);
-    expect(screen.getByText(/Model's analysis/i)).toBeInTheDocument();
-    expect(screen.getByText("This holds only for short horizons.")).toBeInTheDocument();
-    expect(screen.queryByText(/k-abc123/)).not.toBeInTheDocument(); // no raw id
+    expect(screen.queryByText(/Model's analysis/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("This holds only for short horizons.")).not.toBeInTheDocument();
   });
 
-  it("no interpretation block when empty", () => {
-    const guide = baseGuide({ interpretation: [] });
+  it("renders the tl_dr text as an unlabeled lede, with no 'TL;DR' label", () => {
+    const guide = baseGuide({ tl_dr: { text: "Merge sort runs in log-linear time.", claims: ["c3"] } });
     render(<InteractiveGuide guide={guide} progress={{}} citations={[]} onToggleSection={() => {}} />);
-    expect(screen.queryByText(/Model's analysis/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Merge sort runs in log-linear time\./)).toBeInTheDocument();
+    expect(screen.queryByText("TL;DR")).not.toBeInTheDocument();
   });
 
   it("shows an N / total reviewed progress readout driven by the progress prop", () => {

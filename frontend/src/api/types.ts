@@ -207,7 +207,9 @@ export interface StudyGuide {
   skeleton: string[];
   sections: GuideSection[];
   disagreements: Disagreement[];
-  open_questions: string[];
+  // Kept optional for back-compat with cached guides persisted before the
+  // notes redesign; no longer rendered.
+  open_questions?: string[];
   interpretation?: InterpretationItem[];
 }
 

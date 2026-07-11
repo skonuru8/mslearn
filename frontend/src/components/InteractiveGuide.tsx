@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type {
-  CitationRow,
-  Disagreement,
-  GuideItem,
-  GuideSection,
-  InterpretationItem,
-  StudyGuide,
-} from "../api/types";
+import type { CitationRow, Disagreement, GuideItem, GuideSection, StudyGuide } from "../api/types";
 
 type Props = {
   guide: StudyGuide;
@@ -26,18 +19,6 @@ const KIND_LABELS: Record<string, string> = {
 
 function kindClass(kind: string): string {
   return `kind-${Object.prototype.hasOwnProperty.call(KIND_LABELS, kind) ? kind : "claim"}`;
-}
-
-const ANGLE_LABELS: Record<string, string> = {
-  assumption: "Assumptions",
-  evidence: "Evidence",
-  steelman: "Objection",
-  verdict: "Verdict",
-  synthesis: "Synthesis",
-};
-
-function angleClass(angle: string): string {
-  return `angle-${Object.prototype.hasOwnProperty.call(ANGLE_LABELS, angle) ? angle : "synthesis"}`;
 }
 
 /** Assigns each claim id the next free number, in first-appearance order. Scope is local to a call site (per section/tl_dr/disagreement) by design. */
@@ -237,28 +218,6 @@ function DisagreementCard({
   );
 }
 
-/**
- * Renders the model's interpretive analysis (assumptions/evidence/objections/verdict/synthesis)
- * as a clearly-labeled block, separated from the grounded sections. Deliberately never renders
- * item.claims as visible text — this layer is model commentary, not a sourced citation trail.
- */
-function InterpretationBlock({ items }: { items?: InterpretationItem[] }) {
-  if (!items || items.length === 0) {
-    return null;
-  }
-  return (
-    <div className="guide-interpretation">
-      <h3 className="guide-interpretation-title">Model's analysis &mdash; not from your source</h3>
-      {items.map((item, index) => (
-        <div key={index} className={`guide-interpretation-item ${angleClass(item.angle)}`}>
-          <span className="guide-interpretation-angle">{ANGLE_LABELS[item.angle] ?? item.angle}</span>
-          <p className="guide-interpretation-text">{item.text}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /** Highlights the top-most section currently intersecting the viewport; a no-op where IntersectionObserver is unavailable (e.g. jsdom in tests). */
 function useActiveSection(sectionIds: string[]): string {
   const [active, setActive] = useState(sectionIds[0] ?? "");
@@ -364,7 +323,6 @@ export function InteractiveGuide({ guide, progress, citations, onToggleSection }
 
       <div className="guide-main">
         <div className="guide-tldr">
-          <span className="guide-tldr-label">TL;DR</span>
           <p className="guide-tldr-text">
             <ClaimText text={guide.tl_dr.text} claims={guide.tl_dr.claims} numberMap={tlDrNumberMap} />
           </p>
@@ -394,18 +352,6 @@ export function InteractiveGuide({ guide, progress, citations, onToggleSection }
           </div>
         ) : null}
 
-        {guide.open_questions.length > 0 ? (
-          <div className="guide-open-questions">
-            <h3>Open questions</h3>
-            <ul>
-              {guide.open_questions.map((question, index) => (
-                <li key={index}>{question}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        <InterpretationBlock items={guide.interpretation} />
       </div>
     </div>
   );
