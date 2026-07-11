@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from mslearn.pipeline.guide_gen import generate_guide
 from mslearn.pipeline.quiz import generate_question, grade_answer, next_concept, public_quiz_stats
 from mslearn.pipeline.study_extras import make_flashcards, make_selfcheck
+from mslearn.pipeline.study_outline import build_outline
 from mslearn.server.deps import get_ctx, get_project_id
 from mslearn.worker.tasks import synthesize_task
 
@@ -42,6 +43,11 @@ class QuizAnswerRequest(BaseModel):
 @router.get("/curriculum")
 def curriculum(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
     return ctx.graph.curriculum(project_id=project_id)
+
+
+@router.get("/outline")
+def outline(ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    return build_outline(ctx.graph.curriculum(project_id=project_id))
 
 
 @router.get("/concepts/{concept_id}")
