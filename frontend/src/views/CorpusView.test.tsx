@@ -270,7 +270,7 @@ describe("CorpusView", () => {
     ];
     await userEvent.upload(input, files);
 
-    await screen.findByText(/which of these is your main source/i);
+    await screen.findByText(/which file is the main source/i);
     const radios = screen.getAllByRole("radio") as HTMLInputElement[];
     expect(radios).toHaveLength(3);
     expect(radios[0]!.checked).toBe(true);
@@ -295,7 +295,7 @@ describe("CorpusView", () => {
     ];
     await userEvent.upload(input, files);
     await screen.findByText("2 files selected");
-    await screen.findByText(/which of these is your main source/i);
+    await screen.findByText(/which file is the main source/i);
 
     await userEvent.click(screen.getByRole("tab", { name: "From a link" }));
     await userEvent.type(
@@ -333,7 +333,7 @@ describe("CorpusView", () => {
       new File(["b"], "two.pdf", { type: "application/pdf" }),
     ];
     await userEvent.upload(input, files);
-    await screen.findByText(/which of these is your main source/i);
+    await screen.findByText(/which file is the main source/i);
     const radios = screen.getAllByRole("radio");
     await userEvent.click(radios[1]!);
 

@@ -469,16 +469,26 @@ export function CorpusView() {
 
         {uploadFiles.length > 1 ? (
           <fieldset className="main-source-picker">
-            <legend>Which of these is your main source? The rest become extra reading.</legend>
+            <legend>Which file is the main source?</legend>
+            <p className="hint">The rest become extra reading.</p>
             {uploadFiles.map((file, i) => (
-              <label key={i}>
+              <label
+                key={i}
+                className={`source-card ${i === mainSourceIndex ? "is-main" : ""}`}
+              >
                 <input
                   type="radio"
                   name="main-source"
+                  className="source-card-radio"
                   checked={i === mainSourceIndex}
                   onChange={() => setMainSourceIndex(i)}
                 />
-                {file.name}
+                <span className="source-card-name" title={file.name}>
+                  {file.name}
+                </span>
+                <span className="source-card-tag">
+                  {i === mainSourceIndex ? "Main source" : "Supplement"}
+                </span>
               </label>
             ))}
           </fieldset>

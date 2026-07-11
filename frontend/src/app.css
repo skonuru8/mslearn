@@ -542,6 +542,64 @@ td {
   display: none;
 }
 
+.main-source-picker {
+  border: none;
+  padding: 0;
+  margin: 0.5rem 0 1rem;
+}
+
+.main-source-picker legend {
+  font-weight: 600;
+  padding: 0;
+}
+
+.source-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.source-card:focus-within {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.source-card.is-main {
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.source-card-radio {
+  accent-color: #2563eb;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.source-card-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-card-tag {
+  font-size: 0.8rem;
+  color: #6b7280;
+  flex: none;
+}
+
+.source-card.is-main .source-card-tag {
+  color: #2563eb;
+  font-weight: 600;
+}
+
 .settings-block {
   margin: 1.25rem 0;
 }
