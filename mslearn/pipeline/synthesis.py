@@ -22,6 +22,21 @@ _CONCEPT_NAME_SCHEMA = {
 _CONCEPT_DEPS_SCHEMA = {"type": "object", "properties": {"edges": {"type": "array"}}}
 
 
+def _resolve_match(value, candidate_ids: list[str]) -> str | None:
+    """Map a model-returned match to a real candidate claim id, or None to drop.
+    Accepts an exact claim id, or a 1-based index into the presented candidate
+    list (the model often returns the list number instead of the id)."""
+    if value in candidate_ids:
+        return value
+    try:
+        idx = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if 1 <= idx <= len(candidate_ids):
+        return candidate_ids[idx - 1]
+    return None
+
+
 def _compute_anchor_matches(
     ctx, anchor: dict, *, candidate_k: int, similarity_floor: float, prompt: str, project_id: str
 ) -> tuple[str, list[dict], list[str], int]:
@@ -72,12 +87,15 @@ def _compute_anchor_matches(
         return anchor_id, candidates, [], 0
     parsed = response.parsed if isinstance(response.parsed, dict) else {}
     raw_matches = parsed.get("matches", [])
-    matches = [claim_id for claim_id in raw_matches if claim_id in candidate_ids]
+    matches: list[str] = []
     drops = 0
-    for dropped_id in raw_matches:
-        if dropped_id not in candidate_ids:
-            logger.warning("dropped %s: %s", "match", f"claim {dropped_id!r} not in candidate set")
+    for value in raw_matches:
+        resolved = _resolve_match(value, candidate_ids)
+        if resolved is None:
+            logger.warning("dropped %s: %s", "match", f"claim {value!r} not in candidate set")
             drops += 1
+        elif resolved not in matches:
+            matches.append(resolved)
     return anchor_id, candidates, matches, drops
 
 
@@ -184,7 +202,7 @@ def concept_match_claim_ids(ctx, anchor: dict, candidates: list[dict]) -> list[s
     if not candidates:
         return []
     prompt = get_prompt(ctx.db, "concept_match")
-    candidate_ids = {c["claim_id"] for c in candidates}
+    candidate_ids = [c["claim_id"] for c in candidates]
     response = ctx.router.complete(
         "synthesis",
         ModelRequest(
@@ -200,7 +218,12 @@ def concept_match_claim_ids(ctx, anchor: dict, candidates: list[dict]) -> list[s
     )
     parsed = response.parsed if isinstance(response.parsed, dict) else {}
     raw_matches = parsed.get("matches", [])
-    return [claim_id for claim_id in raw_matches if claim_id in candidate_ids]
+    matches: list[str] = []
+    for value in raw_matches:
+        resolved = _resolve_match(value, candidate_ids)
+        if resolved is not None and resolved not in matches:
+            matches.append(resolved)
+    return matches
 
 
 def classify_conflict_pair(

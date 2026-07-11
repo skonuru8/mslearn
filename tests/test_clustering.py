@@ -3,7 +3,7 @@ import time
 
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
-from mslearn.pipeline.synthesis import cluster_new_claims
+from mslearn.pipeline.synthesis import cluster_new_claims, concept_match_claim_ids
 from mslearn.worker.context import PipelineContext
 from tests.fakes import InMemoryGraphStore
 from tests.test_extraction_graph import ScriptedRouter
@@ -130,6 +130,59 @@ def test_cluster_new_claims_parallel_same_assignments(tmp_path):
     assert graph.concept_id_of_claim("c1") == graph.concept_id_of_claim("c2")
     assert graph.concept_id_of_claim("c3") is not None
     assert graph.concept_id_of_claim("c3") != graph.concept_id_of_claim("c1")
+
+
+def _make_match_ctx(tmp_path, outputs):
+    db = OpsDB(tmp_path / "ops.db")
+    router = ScriptedRouter(outputs)
+    return PipelineContext(settings=None, db=db, router=router, graph=None), router
+
+
+def test_concept_match_maps_positional_ids(tmp_path):
+    # The concept_match model frequently returns a candidate's 1-based list
+    # position ("2") instead of its real claim_id. That position must be
+    # resolved back to the claim_id of the candidate presented at that spot
+    # in _concept_match_prompt's numbered list -- not dropped as a stray id.
+    anchor = {"claim_id": "anchor", "text": "anchor text"}
+    candidates = [
+        {"claim_id": "c-a", "text": "candidate a", "stance": "neutral"},
+        {"claim_id": "c-b", "text": "candidate b", "stance": "neutral"},
+        {"claim_id": "c-c", "text": "candidate c", "stance": "neutral"},
+    ]
+    ctx, router = _make_match_ctx(tmp_path, [{"matches": ["2"]}])
+    matches = concept_match_claim_ids(ctx, anchor, candidates)
+    assert matches == ["c-b"]
+    assert router.calls == ["synthesis"]
+
+
+def test_concept_match_drops_out_of_range(tmp_path):
+    # "99" is neither a real claim id nor a valid 1-based index into a
+    # 3-candidate list -- it must still be dropped, not resolved.
+    anchor = {"claim_id": "anchor", "text": "anchor text"}
+    candidates = [
+        {"claim_id": "c-a", "text": "candidate a", "stance": "neutral"},
+        {"claim_id": "c-b", "text": "candidate b", "stance": "neutral"},
+        {"claim_id": "c-c", "text": "candidate c", "stance": "neutral"},
+    ]
+    ctx, router = _make_match_ctx(tmp_path, [{"matches": ["99"]}])
+    matches = concept_match_claim_ids(ctx, anchor, candidates)
+    assert matches == []
+    assert router.calls == ["synthesis"]
+
+
+def test_concept_match_exact_id_still_works(tmp_path):
+    # Regression guard: a model that already returns the real claim_id
+    # (the common, correct case) must keep working unchanged.
+    anchor = {"claim_id": "anchor", "text": "anchor text"}
+    candidates = [
+        {"claim_id": "c-a", "text": "candidate a", "stance": "neutral"},
+        {"claim_id": "c-b", "text": "candidate b", "stance": "neutral"},
+        {"claim_id": "c-c", "text": "candidate c", "stance": "neutral"},
+    ]
+    ctx, router = _make_match_ctx(tmp_path, [{"matches": ["c-c"]}])
+    matches = concept_match_claim_ids(ctx, anchor, candidates)
+    assert matches == ["c-c"]
+    assert router.calls == ["synthesis"]
 
 
 class _TrackingRouter:
