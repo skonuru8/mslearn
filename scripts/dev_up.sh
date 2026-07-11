@@ -74,7 +74,7 @@ trap cleanup INT TERM
 # ingest_sources.error / the failures endpoint, not the terminal; real
 # problems still print.
 echo "== starting Celery prepare worker =="
-.venv/bin/celery -A mslearn.worker.app worker -Q prepare --concurrency=2 -n prepare@%h -l warning &
+.venv/bin/celery -A mslearn.worker.app worker -Q prepare --concurrency="${MSL_PREPARE_CONCURRENCY:-2}" -n prepare@%h -l warning &
 PREPARE_WORKER_PID=$!
 
 echo "== starting Celery extract worker =="
