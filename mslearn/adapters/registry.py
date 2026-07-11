@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from mslearn.adapters.base import SourceDocument
 from mslearn.adapters.blog import load_blog
 from mslearn.adapters.epub import load_epub
+from mslearn.adapters.markdown_src import load_markdown
 from mslearn.adapters.pdf import load_pdf
 from mslearn.adapters.text import load_text
 
@@ -50,6 +51,8 @@ def load_source(
         return load_blog(ref, role)
     if stype == "text":
         return load_text(ref, role)
+    if stype == "markdown":
+        return load_markdown(ref, role)
     if stype == "youtube":
         from mslearn.adapters.youtube import load_youtube  # keeps yt deps lazy
 
