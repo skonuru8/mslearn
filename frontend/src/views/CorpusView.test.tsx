@@ -253,6 +253,36 @@ describe("CorpusView", () => {
     expect(radios[2]!.checked).toBe(false);
   });
 
+  it("preserves file selection and link text when switching tabs", async () => {
+    installFetchMock(corpusHandlers([]));
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(["a"], "one.pdf", { type: "application/pdf" }),
+      new File(["b"], "two.pdf", { type: "application/pdf" }),
+    ];
+    await userEvent.upload(input, files);
+    await screen.findByText("2 files selected");
+    await screen.findByText(/which of these is your main source/i);
+
+    await userEvent.click(screen.getByRole("tab", { name: "From a link" }));
+    await userEvent.type(
+      screen.getByLabelText(/Paste a YouTube or article link/i),
+      "https://example.com/article",
+    );
+
+    await userEvent.click(screen.getByRole("tab", { name: "From my computer" }));
+    expect(screen.getByText("2 files selected")).toBeInTheDocument();
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+
+    await userEvent.click(screen.getByRole("tab", { name: "From a link" }));
+    expect(
+      (screen.getByLabelText(/Paste a YouTube or article link/i) as HTMLInputElement).value,
+    ).toBe("https://example.com/article");
+  });
+
   it("uploads multiple files concurrently with per-file roles", async () => {
     const fetchMock = installFetchMock(corpusHandlers([]));
     const calls: Array<{ name: string; role: string }> = [];
