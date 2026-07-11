@@ -17,6 +17,7 @@ export function ProjectSwitcher() {
     try {
       await createProject(name);
       setNewName("");
+      navigate("/corpus");
     } finally {
       setBusy(false);
     }

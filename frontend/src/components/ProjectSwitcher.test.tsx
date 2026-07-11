@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { describe, it, expect, vi } from "vitest";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -38,5 +39,43 @@ describe("ProjectSwitcher", () => {
       target: { value: "p2" },
     });
     expect(await screen.findByText("my course list")).toBeInTheDocument();
+  });
+
+  it("navigates to My materials when a new project is created", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.startsWith("http") ? new URL(url).pathname : url;
+      if (path === "/api/projects" && init?.method === "POST") {
+        return { ok: true, json: async () => ({ project_id: "p3", name: "Biology 101" }) };
+      }
+      if (path === "/api/projects") {
+        return {
+          ok: true,
+          json: async () => [
+            { project_id: "default", name: "Default", created_ts: 0 },
+            { project_id: "p3", name: "Biology 101", created_ts: 0 },
+          ],
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/curriculum"]}>
+        <ProjectProvider>
+          <ProjectSwitcher />
+          <Routes>
+            <Route path="/curriculum" element={<div>my course list</div>} />
+            <Route path="/corpus" element={<div>My materials</div>} />
+          </Routes>
+        </ProjectProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("combobox", { name: /learning project/i });
+    await userEvent.type(screen.getByLabelText(/new project name/i), "Biology 101");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText("My materials")).toBeInTheDocument();
   });
 });
