@@ -20,11 +20,13 @@ def test_guide_prompt_requires_own_words_not_verbatim_copy():
     assert "must not reword" not in prompt.lower()
 
 
-def test_guide_prompt_requests_interpretation_layer():
-    prompt = PROMPTS["guide"]
-    assert "interpretation" in prompt.lower()
-    for angle in ("assumption", "evidence", "steelman", "verdict", "synthesis"):
-        assert angle in prompt.lower()
+def test_guide_prompt_asks_for_depth_and_drops_interpretation():
+    prompt = PROMPTS["guide"].lower()
+    assert "interpretation" not in prompt
+    assert "open_questions" not in prompt
+    assert "own words" in prompt
+    # depth cues
+    assert "why" in prompt and "example" in prompt
 
 GUIDE_OUTPUT = {
     "concept_id": "con1",
