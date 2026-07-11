@@ -7,6 +7,7 @@ import type {
   FailureGroup,
   IngestResponse,
   RetryFailedResponse,
+  RetrySourceResponse,
   SourceRow,
   SynthesisStatusResponse,
   SynthesizeResponse,
@@ -356,6 +357,19 @@ export function CorpusView() {
     }
   }
 
+  async function onRetrySource(sourceId: string) {
+    try {
+      await api<RetrySourceResponse>(
+        `/api/corpus/sources/${encodeURIComponent(sourceId)}/retry`,
+        { method: "POST" },
+      );
+      await refreshSources();
+      setUserError(null);
+    } catch (err) {
+      captureError(err, "Retry failed");
+    }
+  }
+
   async function onDelete(sourceId: string) {
     const ok = window.confirm(
       "Remove this material? Everything the app learned from it will be removed from your course too.",
@@ -650,6 +664,11 @@ export function CorpusView() {
                   )}
                   {row.failed_chunks > 0 ? (
                     <button type="button" onClick={() => void onRetryFailed(row.source_id)}>
+                      Retry
+                    </button>
+                  ) : null}
+                  {row.status === "failed" ? (
+                    <button type="button" onClick={() => void onRetrySource(row.source_id)}>
                       Retry
                     </button>
                   ) : null}

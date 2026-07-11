@@ -79,6 +79,11 @@ export interface RetryFailedResponse {
   retried_chunks: number;
 }
 
+export interface RetrySourceResponse {
+  source_id: string;
+  mode: "reload" | "chunks";
+}
+
 export interface HealthResponse {
   api: boolean;
   worker: boolean;

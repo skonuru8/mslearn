@@ -147,6 +147,36 @@ describe("CorpusView", () => {
     await waitFor(() => expect(retried).toBe(true));
   });
 
+  it("retries a failed source that never produced chunks", async () => {
+    const row = {
+      source_id: "s1",
+      ref: "a.pdf",
+      role: "spine",
+      status: "failed",
+      total_chunks: 0,
+      done_chunks: 0,
+      failed_chunks: 0,
+      rejected_chunks: 0,
+      error: "SSL error",
+      ts: 1,
+    };
+    let retried = false;
+    installFetchMock({
+      ...corpusHandlers([row]),
+      "/api/corpus/sources/s1/retry": () => {
+        retried = true;
+        return { source_id: "s1", mode: "reload" };
+      },
+      "/api/corpus/sources": () =>
+        retried ? [{ ...row, status: "chunking", error: null }] : [row],
+    });
+
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("a.pdf");
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(retried).toBe(true));
+  });
+
   it("warns when synthesis is enqueued but the worker is offline", async () => {
     installFetchMock({
       ...corpusHandlers(),
