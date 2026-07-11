@@ -332,3 +332,21 @@ export interface EvalReport {
   run: EvalRun | null;
   metrics: EvalMetric[];
 }
+
+export interface EvolveProposal {
+  kind: string;
+  key: string;
+  value?: number;
+  new_prompt?: string;
+  targets_metric: string;
+  why: string;
+}
+
+export interface PendingEvolutionRun {
+  run_id: number;
+  ts: number;
+  proposal: EvolveProposal;
+  shadow_before: Record<string, unknown> | null;
+  shadow_after: Record<string, unknown> | null;
+  why: string;
+}

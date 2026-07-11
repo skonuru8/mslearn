@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from typing import Any, Literal
 
@@ -105,3 +106,44 @@ def trigger_evolve(ctx=Depends(get_ctx)):
 @router.get("/evolve/history")
 def evolve_history(limit: int = 20, ctx=Depends(get_ctx)):
     return ctx.db.evolution_history(limit=limit)
+
+
+def _pending_row(row: dict) -> dict:
+    proposal = json.loads(row["proposal_json"])
+    return {
+        "run_id": row["id"],
+        "ts": row["ts"],
+        "proposal": proposal,
+        "shadow_before": json.loads(row["shadow_before_json"]) if row["shadow_before_json"] else None,
+        "shadow_after": json.loads(row["shadow_after_json"]) if row["shadow_after_json"] else None,
+        "why": row["reason"] or proposal.get("why", ""),
+    }
+
+
+@router.get("/pending")
+def pending_runs(ctx=Depends(get_ctx)):
+    return [_pending_row(row) for row in ctx.db.pending_evolution_runs()]
+
+
+def _find_pending_or_404(ctx, run_id: int) -> dict:
+    row = next((r for r in ctx.db.pending_evolution_runs() if r["id"] == run_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no pending evolution run {run_id}")
+    return row
+
+
+@router.post("/pending/{run_id}/approve")
+def approve_pending(run_id: int, ctx=Depends(get_ctx)):
+    row = _find_pending_or_404(ctx, run_id)
+    proposal = json.loads(row["proposal_json"])
+    prompt_name = str(proposal.get("key", "")).removeprefix("prompt:")
+    ctx.db.set_setting(f"prompt:{prompt_name}", str(proposal.get("new_prompt", "")))
+    ctx.db.set_evolution_run_status(run_id, "applied")
+    return {"run_id": run_id, "status": "applied"}
+
+
+@router.post("/pending/{run_id}/reject")
+def reject_pending(run_id: int, ctx=Depends(get_ctx)):
+    _find_pending_or_404(ctx, run_id)
+    ctx.db.set_evolution_run_status(run_id, "rejected")
+    return {"run_id": run_id, "status": "rejected"}
