@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from collections import defaultdict
 
 import neo4j
 from neo4j import GraphDatabase
@@ -494,11 +495,16 @@ class GraphStore:
             "RETURN k.concept_id AS concept_id, k.name AS name, "
             "k.summary AS summary, k.order_index AS order_index, "
             "coalesce(k.dirty, false) AS dirty, coalesce(k.teach_md, '') AS teach_md, "
-            "k.teach_at AS teach_at, coalesce(k.category, '') AS category",
+            "k.teach_at AS teach_at, coalesce(k.category, '') AS category, "
+            "coalesce(k.section_path, '[]') AS section_path",
             concept_id=concept_id,
             project_id=project_id,
         )
-        return rows[0] if rows else None
+        if not rows:
+            return None
+        row = rows[0]
+        row["section_path"] = json.loads(row["section_path"])
+        return row
 
     def set_concept_teaching(
         self, concept_id: str, teach_md: str, *, project_id: str = "default"
@@ -585,15 +591,49 @@ class GraphStore:
             rows=rows, project_id=project_id,
         )
 
+    def set_concept_sections(self, pairs, *, project_id: str = "default") -> None:
+        """Write section_path (JSON) for many concepts in one round-trip."""
+        if not pairs:
+            return
+        rows = [
+            {"concept_id": cid, "section_path": json.dumps(list(path))}
+            for cid, path in pairs
+        ]
+        self.run_write(
+            "UNWIND $rows AS row "
+            "MATCH (k:Concept {concept_id: row.concept_id, project_id: $project_id}) "
+            "SET k.section_path = row.section_path",
+            rows=rows, project_id=project_id,
+        )
+
+    def concept_section_paths(self, *, project_id: str = "default") -> dict[str, list[tuple[list[str], int]]]:
+        """For each concept, its claims' chunks' (section_path, seq) pairs, so
+        the caller (assign_sections) can pick a home section per concept."""
+        rows = self.run_read(
+            "MATCH (cl:Claim {project_id: $project_id})-[:IN_CONCEPT]->(k:Concept {project_id: $project_id}), "
+            "(cl)-[:EXTRACTED_FROM]->(ch:Chunk {project_id: $project_id}) "
+            "RETURN k.concept_id AS concept_id, coalesce(ch.section_path, '[]') AS section_path, "
+            "ch.seq AS seq",
+            project_id=project_id,
+        )
+        result: dict[str, list[tuple[list[str], int]]] = defaultdict(list)
+        for row in rows:
+            result[row["concept_id"]].append((json.loads(row["section_path"]), row["seq"]))
+        return dict(result)
+
     def all_concepts(self, *, project_id: str = "default") -> list[dict]:
-        return self.run_read(
+        rows = self.run_read(
             "MATCH (k:Concept {project_id: $project_id}) "
             "RETURN k.concept_id AS concept_id, k.name AS name, "
             "k.summary AS summary, k.order_index AS order_index, "
-            "coalesce(k.dirty, false) AS dirty, coalesce(k.category, '') AS category "
+            "coalesce(k.dirty, false) AS dirty, coalesce(k.category, '') AS category, "
+            "coalesce(k.section_path, '[]') AS section_path "
             "ORDER BY k.concept_id",
             project_id=project_id,
         )
+        for row in rows:
+            row["section_path"] = json.loads(row["section_path"])
+        return rows
 
     def spine_concept_order(self, *, project_id: str = "default") -> list[dict]:
         return self.run_read(
@@ -608,7 +648,7 @@ class GraphStore:
     def curriculum(self, *, project_id: str = "default") -> list[dict]:
         # conflict_count rides along so the UI's conflict badges don't need a
         # per-concept detail fetch (one aggregate here vs. an N+1 fan-out).
-        return self.run_read(
+        rows = self.run_read(
             "MATCH (k:Concept {project_id: $project_id}) WHERE k.order_index IS NOT NULL "
             "OPTIONAL MATCH (a:Claim {project_id: $project_id})-[c:CONFLICTS_WITH]->"
             "(b:Claim {project_id: $project_id}), "
@@ -616,10 +656,14 @@ class GraphStore:
             "RETURN k.concept_id AS concept_id, k.name AS name, "
             "k.summary AS summary, k.order_index AS order_index, "
             "coalesce(k.category, '') AS category, "
+            "coalesce(k.section_path, '[]') AS section_path, "
             "count(c) AS conflict_count "
             "ORDER BY k.order_index",
             project_id=project_id,
         )
+        for row in rows:
+            row["section_path"] = json.loads(row["section_path"])
+        return rows
 
     # -- export -----------------------------------------------------------
     def export_all(self, *, project_id: str = "default") -> tuple[list[dict], list[dict]]:

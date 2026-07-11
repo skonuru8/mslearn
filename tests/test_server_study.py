@@ -171,6 +171,7 @@ def test_curriculum_endpoint_returns_store_curriculum(study_client):
             "summary": "Know when cached values become stale.",
             "order_index": 0,
             "category": "",
+            "section_path": [],
             "conflict_count": 0,
         }
     ]

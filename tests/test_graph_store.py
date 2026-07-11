@@ -62,3 +62,49 @@ def test_chunk_section_path_round_trips(clean_graph):
     clean_graph.upsert_chunks(chunks, embed_stub(chunks))
     rows = clean_graph.chunks_for_source(doc.source_id)
     assert json.loads(rows[0]["section_path"]) == ["A", "B"]
+
+
+def test_concept_section_path_rollup(clean_graph):
+    from mslearn.adapters.base import Locator, SourceDocument, StructuralUnit
+    from mslearn.chunking import chunk_source
+    from mslearn.graph.records import ConceptRecord
+    from tests.test_graph_ingest import embed_stub
+
+    doc = SourceDocument(
+        source_id="srcA", source_type="pdf", role="spine", title="Book A",
+        units=[
+            StructuralUnit(0, "p1", "Caching is hard.", Locator(kind="page", page=1),
+                            section_path=("Ch1", "1.1")),
+            StructuralUnit(1, "p2", "Invalidation is harder.", Locator(kind="page", page=2),
+                            section_path=("Ch1", "1.1")),
+        ],
+    )
+    chunks = chunk_source(doc)
+    clean_graph.upsert_source(doc)
+    clean_graph.upsert_chunks(chunks, embed_stub(chunks))
+
+    clean_graph.upsert_concept(ConceptRecord(concept_id="k1", name="N"))
+    from mslearn.graph.records import ClaimRecord
+
+    for chunk in chunks[:2]:
+        claim = ClaimRecord(
+            claim_id=f"cl-{chunk.chunk_id}",
+            text="t",
+            stance="neutral",
+            source_id=chunk.source_id,
+            chunk_id=chunk.chunk_id,
+            trust="trusted",
+            quote="",
+        )
+        clean_graph.upsert_claim(claim, [0.1, 0.2])
+        clean_graph.assign_claim(claim.claim_id, "k1")
+
+    clean_graph.set_concept_sections([("k1", ["Ch1", "1.1"])])
+
+    assert clean_graph.get_concept("k1")["section_path"] == ["Ch1", "1.1"]
+
+    paths = clean_graph.concept_section_paths()
+    entries = paths["k1"]
+    assert sorted(entries) == sorted(
+        [(["Ch1", "1.1"], chunks[0].seq), (["Ch1", "1.1"], chunks[1].seq)]
+    )

@@ -251,6 +251,7 @@ class InMemoryGraphStore:
             "teach_md": current.get("teach_md", ""),
             "teach_at": current.get("teach_at"),
             "category": current.get("category", ""),
+            "section_path": current.get("section_path", []),
             "project_id": project_id,
         }
 
@@ -380,11 +381,39 @@ class InMemoryGraphStore:
                 continue
             self.concepts[concept_id]["category"] = str(category)
 
+    def set_concept_sections(self, pairs, *, project_id: str = "default") -> None:
+        for concept_id, section_path in pairs:
+            if (
+                concept_id not in self.concepts
+                or self.concepts[concept_id].get("project_id", "default") != project_id
+            ):
+                continue
+            self.concepts[concept_id]["section_path"] = list(section_path)
+
+    def concept_section_paths(self, *, project_id: str = "default") -> dict[str, list[tuple[list[str], int]]]:
+        result: dict[str, list[tuple[list[str], int]]] = {}
+        for claim_id, concept_id in self.claim_to_concept.items():
+            claim = self.claims.get(claim_id)
+            if claim is None or claim.get("project_id", "default") != project_id:
+                continue
+            if self.concepts.get(concept_id, {}).get("project_id", "default") != project_id:
+                continue
+            chunk = self.chunks.get(claim.get("chunk_id"))
+            if chunk is None or chunk.get("project_id", "default") != project_id:
+                continue
+            section_path = json.loads(chunk.get("section_path", "[]"))
+            result.setdefault(concept_id, []).append((section_path, chunk.get("seq")))
+        return result
+
     def get_concept(self, concept_id: str, *, project_id: str = "default") -> dict | None:
         concept = self.concepts.get(concept_id)
         if concept is not None and concept.get("project_id", "default") != project_id:
             return None
-        return dict(concept) if concept is not None else None
+        if concept is None:
+            return None
+        row = dict(concept)
+        row.setdefault("section_path", [])
+        return row
 
     def set_concept_teaching(
         self, concept_id: str, teach_md: str, *, project_id: str = "default"
@@ -437,6 +466,7 @@ class InMemoryGraphStore:
                 "order_index": c.get("order_index"),
                 "dirty": c.get("dirty", False),
                 "category": c.get("category", ""),
+                "section_path": c.get("section_path", []),
             }
             for _cid, c in sorted(self.concepts.items())
             if c.get("project_id", "default") == project_id
@@ -488,6 +518,7 @@ class InMemoryGraphStore:
                 "summary": c.get("summary", ""),
                 "order_index": c.get("order_index"),
                 "category": c.get("category", ""),
+                "section_path": c.get("section_path", []),
                 "conflict_count": sum(
                     1
                     for (a, b) in self.conflicts
