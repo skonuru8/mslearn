@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from mslearn.graph.records import CONFLICT_CLASSIFICATIONS, ConceptRecord
 from mslearn.prompts import domain_guidance, get_domain_profile, get_prompt
-from mslearn.providers.base import ModelMessage, ModelRequest, ProviderError
+from mslearn.providers.base import ModelMessage, ModelRequest, ProviderBadOutputError
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def _compute_anchor_matches(
                 max_tokens=int(ctx.db.get_tunable("synth.max_tokens")),
             ),
         )
-    except ProviderError:
+    except ProviderBadOutputError:
         # A malformed/truncated concept_match response (frequent with
         # deepseek-v4-flash on large corpora) must not crash the whole
         # clustering run -- degrade to "no match" for this anchor alone; it
@@ -297,7 +297,7 @@ def _process_one_concept(
                     max_tokens=int(db.get_tunable("synth.max_tokens")),
                 ),
             )
-        except ProviderError:
+        except ProviderBadOutputError:
             # A malformed/truncated conflict_scan response must not crash
             # the whole synthesis run -- just skip conflict recording for
             # this concept and keep going.
@@ -347,7 +347,7 @@ def _process_one_concept(
                 max_tokens=int(db.get_tunable("synth.max_tokens")),
             ),
         )
-    except ProviderError:
+    except ProviderBadOutputError:
         # A malformed/truncated concept_name response must not crash the
         # run -- fall back to a deterministic name derived from the
         # concept's claims below instead of the model's judgment.
@@ -477,7 +477,7 @@ def build_curriculum(ctx, project_id: str = "default") -> list[str]:
                     max_tokens=int(db.get_tunable("synth.max_tokens")),
                 ),
             )
-        except ProviderError:
+        except ProviderBadOutputError:
             # A malformed/truncated concept_deps response must not crash
             # the run -- skip adding edges; the topo-sort below falls back
             # to natural spine order (deps stays as whatever was already

@@ -1,6 +1,8 @@
 import threading
 import time
 
+import pytest
+
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.synthesis import cluster_new_claims, concept_match_claim_ids
@@ -252,6 +254,27 @@ def test_cluster_survives_bad_match_response(tmp_path):
     assert graph.concept_id_of_claim("cl1") is not None
     assert graph.concept_id_of_claim("cl2") is not None
     assert dirty
+
+
+def test_cluster_propagates_transient_error(tmp_path):
+    # ProviderTransientError (retryable 429/5xx) must NOT be swallowed as a
+    # degradation case like ProviderBadOutputError -- it needs to propagate
+    # out of cluster_new_claims so synthesize_task's autoretry_for kicks in
+    # and Celery retries the whole synthesis run, instead of silently
+    # degrading to "no match" and permanently over-splitting the curriculum.
+    from mslearn.providers.base import ProviderTransientError
+
+    graph = InMemoryGraphStore()
+    graph.add_claim("cl1", "cache ttl", "neutral", "s1", [1.0, 0.0, 0.0])
+    graph.add_claim("cl2", "cache expiry", "neutral", "s1", [0.99, 0.01, 0.0])
+    ctx, router = make_ctx(
+        tmp_path,
+        graph,
+        [ProviderTransientError("rate limited"), ProviderTransientError("rate limited")],
+    )
+
+    with pytest.raises(ProviderTransientError):
+        cluster_new_claims(ctx)
 
 
 def test_cluster_new_claims_runs_calls_in_parallel(tmp_path):
