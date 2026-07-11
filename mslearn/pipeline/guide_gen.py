@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json
-from mslearn.pipeline.guide import GUIDE_SCHEMA, drop_uncited, parse_guide
+from mslearn.pipeline.guide import GUIDE_SCHEMA, drop_ungrounded, parse_guide
 from mslearn.pipeline.teaching import _format_memory_hints, _trusted_claims
 from mslearn.prompts import domain_guidance, get_domain_profile, get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest
@@ -48,8 +48,8 @@ def generate_guide(ctx, concept_id, force=False, project_id="default") -> tuple[
         json_schema=GUIDE_SCHEMA,
         max_tokens=int(ctx.db.get_tunable("guide.max_tokens")),
     ))
-    guide = drop_uncited(parse_guide({**(resp.parsed or {}), "concept_id": concept_id,
-                                      "title": concept.get("name", "")}))
+    guide = drop_ungrounded(parse_guide({**(resp.parsed or {}), "concept_id": concept_id,
+                                         "title": concept.get("name", "")}))
     data = guide.model_dump()
     data["disagreements"] = _disagreements(ctx.graph, concept_id, project_id)
     ctx.graph.set_concept_teaching(concept_id, json.dumps(data), project_id=project_id)

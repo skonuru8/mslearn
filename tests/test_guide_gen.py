@@ -7,9 +7,24 @@ from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.guide import GuideParseError
 from mslearn.pipeline.guide_gen import generate_guide
+from mslearn.prompts import PROMPTS
 from mslearn.settings import Settings
 from mslearn.worker.context import PipelineContext
 from tests.fakes import InMemoryGraphStore, RaisingLearnerMemory, ScriptedRouter
+
+
+def test_guide_prompt_requires_own_words_not_verbatim_copy():
+    prompt = PROMPTS["guide"]
+    assert "own words" in prompt.lower()
+    assert "verbatim" not in prompt.lower()
+    assert "must not reword" not in prompt.lower()
+
+
+def test_guide_prompt_requests_interpretation_layer():
+    prompt = PROMPTS["guide"]
+    assert "interpretation" in prompt.lower()
+    for angle in ("assumption", "evidence", "steelman", "verdict", "synthesis"):
+        assert angle in prompt.lower()
 
 GUIDE_OUTPUT = {
     "concept_id": "con1",
@@ -87,6 +102,60 @@ def test_generate_guide_drops_uncited_and_adds_disagreements(fake_ctx):
     assert disagreement["b"]["label"] == "Position B"
     assert "c3" not in disagreement["a"]["label"]
     assert "c4" not in disagreement["b"]["label"]
+
+
+def test_generate_guide_includes_interpretation(tmp_path):
+    payload = dict(GUIDE_OUTPUT)
+    payload["sections"] = [
+        {
+            "id": "s1",
+            "title": "Cost",
+            "items": [
+                {"kind": "claim", "text": "It sorts by splitting and merging, giving log-linear cost.", "claims": ["c3"]},
+            ],
+        }
+    ]
+    payload["interpretation"] = [
+        {"angle": "verdict", "text": "The complexity claim holds up given the divide-and-conquer structure.", "claims": ["c3"]},
+        {"angle": "synthesis", "text": "Overall this suggests a solid default sort for large inputs.", "claims": []},
+    ]
+    router = ScriptedRouter(outputs=[payload])
+    ctx = make_ctx(tmp_path, router)
+
+    out, _cached = generate_guide(ctx, "con1", force=True)
+
+    assert "interpretation" in out
+    angles = {item["angle"] for item in out["interpretation"]}
+    assert angles == {"verdict", "synthesis"}
+    assert len(out["interpretation"]) == 2
+
+
+def test_generate_guide_uses_drop_ungrounded(tmp_path):
+    payload = dict(GUIDE_OUTPUT)
+    payload["sections"] = [
+        {
+            "id": "s1",
+            "title": "Cost",
+            "items": [
+                {"kind": "claim", "text": "It sorts by splitting and merging, giving log-linear cost.", "claims": ["c3"]},
+                {"kind": "example", "text": "an uncited hallucinated fact", "claims": []},
+            ],
+        }
+    ]
+    payload["interpretation"] = [
+        {"angle": "synthesis", "text": "An uncited but legitimate analysis observation.", "claims": []},
+    ]
+    router = ScriptedRouter(outputs=[payload])
+    ctx = make_ctx(tmp_path, router)
+
+    out, _cached = generate_guide(ctx, "con1", force=True)
+
+    section_texts = [item["text"] for sec in out["sections"] for item in sec["items"]]
+    assert "an uncited hallucinated fact" not in section_texts
+    assert all(item["claims"] for sec in out["sections"] for item in sec["items"])
+    # interpretation is untouched by the grounded-items gate
+    assert len(out["interpretation"]) == 1
+    assert out["interpretation"][0]["angle"] == "synthesis"
 
 
 def test_generate_guide_memory_failure_degrades(fake_ctx_raising_memory):
