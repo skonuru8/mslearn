@@ -6,7 +6,12 @@ from mslearn.chunking import chunk_source
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.extraction_graph import build_extraction_graph
-from mslearn.pipeline.synthesis import build_curriculum, cluster_new_claims, process_dirty_concepts
+from mslearn.pipeline.synthesis import (
+    assign_categories,
+    build_curriculum,
+    cluster_new_claims,
+    process_dirty_concepts,
+)
 from mslearn.worker import tasks as worker_tasks
 from mslearn.worker.app import app
 from mslearn.worker.context import PipelineContext, set_context
@@ -136,6 +141,7 @@ def test_end_to_end_synthesis(clean_graph, tmp_path):
             {"name": "Caching Tradeoffs", "summary": "Caching helps latency. Caching can add complexity."},
             {"name": "Bypass Cache Cases", "summary": "Sometimes direct reads win. Freshness can dominate."},
             {"edges": [{"from_concept": "k-cl3", "to_concept": "k-cl1"}]},
+            {"categories": [{"name": "Caching", "concept_ids": ["k-cl1", "k-cl3"]}]},
         ]
     )
     ctx = PipelineContext(settings=None, db=db, router=router, graph=clean_graph)
@@ -144,6 +150,7 @@ def test_end_to_end_synthesis(clean_graph, tmp_path):
     dirty = cluster_new_claims(ctx)
     processed = process_dirty_concepts(ctx)
     ordered = build_curriculum(ctx)
+    assign_categories(ctx)
     db.set_project_setting(
         "default", "synthesis:last_run",
         json.dumps(
@@ -156,10 +163,13 @@ def test_end_to_end_synthesis(clean_graph, tmp_path):
         ),
     )
 
-    assert router.calls == ["synthesis", "synthesis", "synthesis", "synthesis", "synthesis"]
+    assert router.calls == [
+        "synthesis", "synthesis", "synthesis", "synthesis", "synthesis", "synthesis",
+    ]
     assert clean_graph.conflicts_in_concept("k-cl1")[0]["classification"] == "genuine_debate"
     cur = clean_graph.curriculum()
     assert [row["concept_id"] for row in cur][:2] == ["k-cl1", "k-cl3"]
+    assert all(row["category"] == "Caching" for row in cur[:2])
     assert db.get_project_setting("default", "synthesis:last_run") is not None
 
 
@@ -202,6 +212,7 @@ def test_synthesize_task_enqueues_warm_guides_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: set())
     monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
 
     calls = []
     monkeypatch.setattr(
