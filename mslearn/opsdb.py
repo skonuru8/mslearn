@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import threading
 import time
@@ -115,6 +116,16 @@ CREATE TABLE IF NOT EXISTS study_progress (
   reviewed   INTEGER NOT NULL DEFAULT 0,
   ts         REAL NOT NULL,
   PRIMARY KEY (project_id, concept_id, section_id)
+);
+CREATE TABLE IF NOT EXISTS note_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    concept_id TEXT NOT NULL,
+    helpful INTEGER,
+    tags TEXT NOT NULL DEFAULT '[]',
+    comment TEXT NOT NULL DEFAULT '',
+    guide_hash TEXT,
+    ts INTEGER NOT NULL
 );
 """
 
@@ -898,6 +909,82 @@ class OpsDB:
                 "WHERE project_id=? AND concept_id=?", (project_id, concept_id),
             ).fetchall()
         return {r["section_id"]: bool(r["reviewed"]) for r in rows}
+
+    def add_note_feedback(
+        self,
+        project_id: str,
+        concept_id: str,
+        *,
+        helpful: bool | None,
+        tags: list[str],
+        comment: str,
+        guide_hash: str | None,
+    ) -> int:
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT INTO note_feedback"
+                " (project_id, concept_id, helpful, tags, comment, guide_hash, ts)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    project_id,
+                    concept_id,
+                    None if helpful is None else (1 if helpful else 0),
+                    json.dumps(list(tags)),
+                    comment,
+                    guide_hash,
+                    int(time.time()),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def feedback_for_concept(self, concept_id: str, project_id: str) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM note_feedback WHERE project_id = ? AND concept_id = ?"
+                " ORDER BY id DESC LIMIT 1",
+                (project_id, concept_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return _feedback_row_to_dict(row)
+
+    def feedback_aggregate(self, project_id: str) -> dict:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT helpful, tags FROM note_feedback WHERE project_id = ?",
+                (project_id,),
+            ).fetchall()
+        agg = {
+            "total_rated": len(rows),
+            "helpful": 0,
+            "too_shallow": 0,
+            "repetitive": 0,
+            "wrong": 0,
+            "off_topic": 0,
+        }
+        for row in rows:
+            if row["helpful"]:
+                agg["helpful"] += 1
+            for tag in json.loads(row["tags"] or "[]"):
+                if tag in agg:
+                    agg[tag] += 1
+        return agg
+
+    def recent_negative_feedback(self, project_id: str, limit: int = 20) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM note_feedback WHERE project_id = ?"
+                " AND (helpful = 0 OR tags != '[]') ORDER BY id DESC LIMIT ?",
+                (project_id, limit),
+            ).fetchall()
+        return [_feedback_row_to_dict(row) for row in rows]
+
+
+def _feedback_row_to_dict(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["helpful"] = None if data["helpful"] is None else bool(data["helpful"])
+    data["tags"] = json.loads(data["tags"] or "[]")
+    return data
 
 
 def _quiz_aggregate(concept_id: str, rows: list[dict]) -> dict:
