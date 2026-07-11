@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 
@@ -148,6 +149,7 @@ class GraphStore:
                 "para_index": c.locator.para_index,
                 "start_s": c.locator.start_s,
                 "end_s": c.locator.end_s,
+                "section_path": json.dumps(list(c.section_path)),
                 "project_id": project_id,
             }
             for c, emb in zip(chunks, embeddings)
@@ -168,7 +170,8 @@ class GraphStore:
             "RETURN c.chunk_id AS chunk_id, c.seq AS seq, c.unit_index AS unit_index, "
             "c.text AS text, c.kind AS kind, c.page AS page, c.href AS href, "
             "c.url AS url, c.para_index AS para_index, c.start_s AS start_s, "
-            "c.end_s AS end_s ORDER BY c.seq",
+            "c.end_s AS end_s, coalesce(c.section_path, '[]') AS section_path "
+            "ORDER BY c.seq",
             source_id=source_id,
             project_id=project_id,
         )
@@ -519,7 +522,8 @@ class GraphStore:
             "RETURN c.claim_id AS claim_id, c.quote AS quote, ch.chunk_id AS chunk_id, "
             "ch.source_id AS source_id, ch.seq AS seq, ch.unit_index AS unit_index, "
             "ch.kind AS kind, ch.page AS page, ch.href AS href, ch.url AS url, "
-            "ch.para_index AS para_index, ch.start_s AS start_s, ch.end_s AS end_s "
+            "ch.para_index AS para_index, ch.start_s AS start_s, ch.end_s AS end_s, "
+            "coalesce(ch.section_path, '[]') AS section_path "
             "ORDER BY c.claim_id",
             claim_ids=claim_ids,
             project_id=project_id,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import time
 import uuid
@@ -99,6 +100,7 @@ class InMemoryGraphStore:
                 "para_index": chunk.locator.para_index,
                 "start_s": chunk.locator.start_s,
                 "end_s": chunk.locator.end_s,
+                "section_path": json.dumps(list(chunk.section_path)),
                 "project_id": project_id,
             }
 
@@ -421,6 +423,7 @@ class InMemoryGraphStore:
                     "para_index": chunk.get("para_index"),
                     "start_s": chunk.get("start_s"),
                     "end_s": chunk.get("end_s"),
+                    "section_path": chunk.get("section_path", "[]"),
                 }
             )
         return rows

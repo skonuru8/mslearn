@@ -47,3 +47,18 @@ def test_set_and_read_concept_category(clean_graph):
     assert clean_graph.get_concept("k1")["category"] == "Numbers"
     rows = {c["concept_id"]: c for c in clean_graph.all_concepts()}
     assert rows["k1"]["category"] == "Numbers"
+
+
+def test_chunk_section_path_round_trips(clean_graph):
+    import json
+
+    from mslearn.chunking import chunk_source
+    from tests.test_graph_ingest import embed_stub, make_doc
+
+    doc = make_doc()
+    chunks = chunk_source(doc)
+    chunks[0].section_path = ("A", "B")
+    clean_graph.upsert_source(doc)
+    clean_graph.upsert_chunks(chunks, embed_stub(chunks))
+    rows = clean_graph.chunks_for_source(doc.source_id)
+    assert json.loads(rows[0]["section_path"]) == ["A", "B"]
