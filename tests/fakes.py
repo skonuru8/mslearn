@@ -248,6 +248,7 @@ class InMemoryGraphStore:
             "dirty": current.get("dirty", False),
             "teach_md": current.get("teach_md", ""),
             "teach_at": current.get("teach_at"),
+            "category": current.get("category", ""),
             "project_id": project_id,
         }
 
@@ -341,6 +342,7 @@ class InMemoryGraphStore:
         name: str | None = None,
         summary: str | None = None,
         order_index: int | None = None,
+        category: str | None = None,
         *,
         project_id: str = "default",
     ) -> None:
@@ -355,6 +357,8 @@ class InMemoryGraphStore:
             self.concepts[concept_id]["summary"] = summary
         if order_index is not None:
             self.concepts[concept_id]["order_index"] = int(order_index)
+        if category is not None:
+            self.concepts[concept_id]["category"] = category
 
     def set_concept_orders(self, orders, *, project_id: str = "default") -> None:
         for concept_id, order_index in orders:
@@ -364,6 +368,15 @@ class InMemoryGraphStore:
             ):
                 continue
             self.concepts[concept_id]["order_index"] = int(order_index)
+
+    def set_concept_categories(self, pairs, *, project_id: str = "default") -> None:
+        for concept_id, category in pairs:
+            if (
+                concept_id not in self.concepts
+                or self.concepts[concept_id].get("project_id", "default") != project_id
+            ):
+                continue
+            self.concepts[concept_id]["category"] = str(category)
 
     def get_concept(self, concept_id: str, *, project_id: str = "default") -> dict | None:
         concept = self.concepts.get(concept_id)
@@ -420,6 +433,7 @@ class InMemoryGraphStore:
                 "summary": c.get("summary", ""),
                 "order_index": c.get("order_index"),
                 "dirty": c.get("dirty", False),
+                "category": c.get("category", ""),
             }
             for _cid, c in sorted(self.concepts.items())
             if c.get("project_id", "default") == project_id
@@ -470,6 +484,7 @@ class InMemoryGraphStore:
                 "name": c.get("name", ""),
                 "summary": c.get("summary", ""),
                 "order_index": c.get("order_index"),
+                "category": c.get("category", ""),
                 "conflict_count": sum(
                     1
                     for (a, b) in self.conflicts

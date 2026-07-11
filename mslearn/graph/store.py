@@ -491,7 +491,7 @@ class GraphStore:
             "RETURN k.concept_id AS concept_id, k.name AS name, "
             "k.summary AS summary, k.order_index AS order_index, "
             "coalesce(k.dirty, false) AS dirty, coalesce(k.teach_md, '') AS teach_md, "
-            "k.teach_at AS teach_at",
+            "k.teach_at AS teach_at, coalesce(k.category, '') AS category",
             concept_id=concept_id,
             project_id=project_id,
         )
@@ -531,6 +531,7 @@ class GraphStore:
         name: str | None = None,
         summary: str | None = None,
         order_index: int | None = None,
+        category: str | None = None,
         *,
         project_id: str = "default",
     ) -> None:
@@ -545,6 +546,9 @@ class GraphStore:
         if order_index is not None:
             updates.append("k.order_index = $order_index")
             params["order_index"] = int(order_index)
+        if category is not None:
+            updates.append("k.category = $category")
+            params["category"] = category
         if not updates:
             return
         self.run_write_checked(
@@ -565,12 +569,24 @@ class GraphStore:
             rows=rows, project_id=project_id,
         )
 
+    def set_concept_categories(self, pairs, *, project_id: str = "default") -> None:
+        """Write category for many concepts in one round-trip."""
+        if not pairs:
+            return
+        rows = [{"concept_id": cid, "category": str(cat)} for cid, cat in pairs]
+        self.run_write(
+            "UNWIND $rows AS row "
+            "MATCH (k:Concept {concept_id: row.concept_id, project_id: $project_id}) "
+            "SET k.category = row.category",
+            rows=rows, project_id=project_id,
+        )
+
     def all_concepts(self, *, project_id: str = "default") -> list[dict]:
         return self.run_read(
             "MATCH (k:Concept {project_id: $project_id}) "
             "RETURN k.concept_id AS concept_id, k.name AS name, "
             "k.summary AS summary, k.order_index AS order_index, "
-            "coalesce(k.dirty, false) AS dirty "
+            "coalesce(k.dirty, false) AS dirty, coalesce(k.category, '') AS category "
             "ORDER BY k.concept_id",
             project_id=project_id,
         )
@@ -595,6 +611,7 @@ class GraphStore:
             "(a)-[:IN_CONCEPT]->(k), (b)-[:IN_CONCEPT]->(k) "
             "RETURN k.concept_id AS concept_id, k.name AS name, "
             "k.summary AS summary, k.order_index AS order_index, "
+            "coalesce(k.category, '') AS category, "
             "count(c) AS conflict_count "
             "ORDER BY k.order_index",
             project_id=project_id,

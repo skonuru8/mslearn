@@ -37,3 +37,13 @@ def test_get_chunk(clean_graph):
     row = clean_graph.get_chunk(chunks[0].chunk_id)
     assert row["text"] == chunks[0].text and row["kind"] == "page"
     assert clean_graph.get_chunk("missing") is None
+
+
+def test_set_and_read_concept_category(clean_graph):
+    from mslearn.graph.records import ConceptRecord
+
+    clean_graph.upsert_concept(ConceptRecord(concept_id="k1", name="N"))
+    clean_graph.set_concept_categories([("k1", "Numbers")])
+    assert clean_graph.get_concept("k1")["category"] == "Numbers"
+    rows = {c["concept_id"]: c for c in clean_graph.all_concepts()}
+    assert rows["k1"]["category"] == "Numbers"

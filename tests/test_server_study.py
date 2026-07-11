@@ -170,6 +170,7 @@ def test_curriculum_endpoint_returns_store_curriculum(study_client):
             "name": "Cache invalidation",
             "summary": "Know when cached values become stale.",
             "order_index": 0,
+            "category": "",
             "conflict_count": 0,
         }
     ]
