@@ -85,6 +85,8 @@ export function CorpusView() {
   const [synthesisStatus, setSynthesisStatus] = useState<SynthesisStatusResponse | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const role = isMainCourse ? "spine" : "supplement";
   const hasSpine = sources.some((row) => row.role === "spine");
   // Once the user manually toggles the main-course checkbox we stop
@@ -431,7 +433,13 @@ export function CorpusView() {
             role="tab"
             aria-selected={addTab === "file"}
             className={addTab === "file" ? "active" : undefined}
-            onClick={() => setAddTab("file")}
+            onClick={() => {
+              if (addTab === "file") {
+                fileInputRef.current?.click();
+              } else {
+                setAddTab("file");
+              }
+            }}
           >
             From my computer
           </button>
@@ -513,6 +521,7 @@ export function CorpusView() {
               <label className="browse-label">
                 Browse
                 <input
+                  ref={fileInputRef}
                   type="file"
                   multiple
                   accept=".pdf,.epub,.html,.htm,.mp3,.m4a,.wav,.flac,.ogg,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic"

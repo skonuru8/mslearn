@@ -177,6 +177,25 @@ describe("CorpusView", () => {
     await waitFor(() => expect(retried).toBe(true));
   });
 
+  it("opens the file dialog when the already-active upload tab is clicked", async () => {
+    installFetchMock(corpusHandlers([]));
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+
+    // "From my computer" is active by default — clicking it again should
+    // open the file dialog, not just re-select the (already-selected) tab.
+    await userEvent.click(screen.getByRole("tab", { name: "From my computer" }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    // Switching to the other tab must NOT open the file dialog.
+    await userEvent.click(screen.getByRole("tab", { name: "From a link" }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    clickSpy.mockRestore();
+  });
+
   it("warns when synthesis is enqueued but the worker is offline", async () => {
     installFetchMock({
       ...corpusHandlers(),
