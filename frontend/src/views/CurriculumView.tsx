@@ -6,6 +6,42 @@ import { useProject } from "../context/ProjectContext";
 import { ErrorBanner, Loading } from "../components/Status";
 import { formatSynthesisProgress } from "../utils/userMessages";
 
+function groupByCategory(concepts: ConceptMeta[]): [string, ConceptMeta[]][] {
+  const order: string[] = [];
+  const groups = new Map<string, ConceptMeta[]>();
+  for (const c of concepts) {
+    const key = c.category && c.category.trim() ? c.category : "Other";
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(c);
+  }
+  // "Other" always last
+  order.sort((a, b) => (a === "Other" ? 1 : 0) - (b === "Other" ? 1 : 0));
+  return order.map((k) => [k, groups.get(k)!]);
+}
+
+function ConceptListItems({ concepts }: { concepts: ConceptMeta[] }) {
+  return (
+    <ul className="concept-list">
+      {concepts.map((concept) => (
+        <li key={concept.concept_id}>
+          <Link to={`/concepts/${concept.concept_id}`}>
+            <strong>
+              {concept.order_index ?? "—"}. {concept.name}
+            </strong>
+            <div>{concept.summary}</div>
+            {(concept.conflict_count ?? 0) > 0 ? (
+              <span className="badge">{concept.conflict_count} different views</span>
+            ) : null}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function CurriculumView() {
   const { projectId } = useProject();
   const [concepts, setConcepts] = useState<ConceptMeta[]>([]);
@@ -83,21 +119,23 @@ export function CurriculumView() {
           </Link>
         </div>
       ) : (
-        <ul className="concept-list">
-          {concepts.map((concept) => (
-            <li key={concept.concept_id}>
-              <Link to={`/concepts/${concept.concept_id}`}>
-                <strong>
-                  {concept.order_index ?? "—"}. {concept.name}
-                </strong>
-                <div>{concept.summary}</div>
-                {(concept.conflict_count ?? 0) > 0 ? (
-                  <span className="badge">{concept.conflict_count} different views</span>
-                ) : null}
-              </Link>
-            </li>
-          ))}
-        </ul>
+        (() => {
+          const grouped = groupByCategory(concepts);
+          const allUncategorized = grouped.length === 1 && grouped[0][0] === "Other";
+          if (allUncategorized) {
+            return <ConceptListItems concepts={concepts} />;
+          }
+          return (
+            <>
+              {grouped.map(([category, items]) => (
+                <details key={category} className="concept-category" open>
+                  <summary>{category}</summary>
+                  <ConceptListItems concepts={items} />
+                </details>
+              ))}
+            </>
+          );
+        })()
       )}
     </section>
   );
