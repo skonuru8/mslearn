@@ -132,6 +132,24 @@ export interface ConceptMeta {
   teach_at?: number | null;
 }
 
+export interface OutlineConcept {
+  concept_id: string;
+  name: string;
+  conflict_count?: number;
+}
+
+export interface OutlineNode {
+  title: string;
+  concepts: OutlineConcept[];
+  children: OutlineNode[];
+}
+
+export interface OutlineResponse {
+  tree: OutlineNode[];
+  flat: OutlineConcept[];
+  has_structure: boolean;
+}
+
 export interface ClaimRow {
   claim_id: string;
   text: string;

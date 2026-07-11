@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { CurriculumView } from "./CurriculumView";
 import { ProjectProvider } from "../context/ProjectContext";
 
-function mockFetchForConcepts(concepts: unknown[]) {
+function mockFetchForConcepts(concepts: unknown[], outline?: unknown) {
   const fetchMock = vi.fn(async (url: string) => {
     const path = url.startsWith("http") ? new URL(url).pathname : url;
     if (path === "/api/projects") {
@@ -15,6 +15,9 @@ function mockFetchForConcepts(concepts: unknown[]) {
     }
     if (path === "/api/study/curriculum") {
       return { ok: true, json: async () => concepts };
+    }
+    if (path === "/api/study/outline") {
+      return { ok: true, json: async () => outline ?? {} };
     }
     if (path === "/api/corpus/synthesis/status") {
       return { ok: true, json: async () => ({ last_run: null }) };
@@ -65,6 +68,69 @@ describe("CurriculumView", () => {
     expect(await screen.findByText(/Loops/)).toBeInTheDocument();
     expect(screen.getByText(/Arrays/)).toBeInTheDocument();
     expect(screen.queryByText("Other")).not.toBeInTheDocument();
+  });
+
+  it("renders a chapter/section outline tree when the outline endpoint reports structure", async () => {
+    mockFetchForConcepts(
+      [
+        { concept_id: "k1", name: "Numbers", summary: "About numbers.", order_index: 0, category: "Ch1" },
+        { concept_id: "k2", name: "History", summary: "About history.", order_index: 1, category: "Ch2" },
+      ],
+      {
+        has_structure: true,
+        tree: [
+          {
+            title: "Ch1",
+            concepts: [],
+            children: [
+              {
+                title: "1.1 Basics",
+                concepts: [{ concept_id: "k1", name: "Numbers", conflict_count: 0 }],
+                children: [],
+              },
+            ],
+          },
+          {
+            title: "Ch2",
+            concepts: [{ concept_id: "k2", name: "History", conflict_count: 0 }],
+            children: [],
+          },
+        ],
+        flat: [],
+      },
+    );
+
+    renderCurriculum();
+
+    expect(await screen.findByText("Ch1")).toBeInTheDocument();
+    expect(screen.getByText("1.1 Basics")).toBeInTheDocument();
+    expect(screen.getByText("Ch2")).toBeInTheDocument();
+    expect(screen.getByText(/Numbers/)).toBeInTheDocument();
+    expect(screen.getByText(/History/)).toBeInTheDocument();
+  });
+
+  it("renders the flat category list when the outline endpoint reports no structure (Spec-A regression)", async () => {
+    mockFetchForConcepts(
+      [
+        { concept_id: "k1", name: "Loops", summary: "Iterate.", order_index: 0, category: "Numbers" },
+        { concept_id: "k2", name: "Arrays", summary: "Store lists.", order_index: 1, category: "Numbers" },
+      ],
+      {
+        has_structure: false,
+        tree: [],
+        flat: [
+          { concept_id: "k1", name: "Loops", conflict_count: 0 },
+          { concept_id: "k2", name: "Arrays", conflict_count: 0 },
+        ],
+      },
+    );
+
+    renderCurriculum();
+
+    expect(await screen.findByText("Numbers")).toBeInTheDocument();
+    expect(screen.getByText(/Loops/)).toBeInTheDocument();
+    expect(screen.getByText(/Arrays/)).toBeInTheDocument();
+    expect(screen.queryByText("outline-node")).not.toBeInTheDocument();
   });
 
   it("polls the curriculum every 15s while building, and pauses when the tab is hidden", async () => {

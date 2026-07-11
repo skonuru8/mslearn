@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { ConceptMeta, SynthesisProgress, SynthesisStatusResponse } from "../api/types";
+import type {
+  ConceptMeta,
+  OutlineConcept,
+  OutlineNode,
+  OutlineResponse,
+  SynthesisProgress,
+  SynthesisStatusResponse,
+} from "../api/types";
 import { useProject } from "../context/ProjectContext";
 import { ErrorBanner, Loading } from "../components/Status";
 import { formatSynthesisProgress } from "../utils/userMessages";
@@ -42,20 +49,54 @@ function ConceptListItems({ concepts }: { concepts: ConceptMeta[] }) {
   );
 }
 
+function OutlineConceptItems({ concepts }: { concepts: OutlineConcept[] }) {
+  return (
+    <ul className="concept-list">
+      {concepts.map((concept) => (
+        <li key={concept.concept_id}>
+          <Link to={`/concepts/${concept.concept_id}`}>
+            <strong>{concept.name}</strong>
+            {(concept.conflict_count ?? 0) > 0 ? (
+              <span className="badge">{concept.conflict_count} different views</span>
+            ) : null}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function OutlineTree({ nodes }: { nodes: OutlineNode[] }) {
+  return (
+    <>
+      {nodes.map((node) => (
+        <details key={node.title} className="outline-node" open>
+          <summary>{node.title}</summary>
+          <OutlineConceptItems concepts={node.concepts} />
+          <OutlineTree nodes={node.children} />
+        </details>
+      ))}
+    </>
+  );
+}
+
 export function CurriculumView() {
   const { projectId } = useProject();
   const [concepts, setConcepts] = useState<ConceptMeta[]>([]);
+  const [outline, setOutline] = useState<OutlineResponse | null>(null);
   const [building, setBuilding] = useState(false);
   const [progress, setProgress] = useState<SynthesisProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [rows, synth] = await Promise.all([
+    const [rows, outlineRes, synth] = await Promise.all([
       api<ConceptMeta[]>("/api/study/curriculum"),
+      api<OutlineResponse>("/api/study/outline").catch(() => null),
       api<SynthesisStatusResponse>("/api/corpus/synthesis/status").catch(() => null),
     ]);
     setConcepts(rows);
+    setOutline(outlineRes);
     setBuilding(Boolean(synth?.running_since));
     setProgress(synth?.progress ?? null);
     setError(null);
@@ -143,6 +184,16 @@ export function CurriculumView() {
             Add learning material
           </Link>
         </div>
+      ) : outline?.has_structure ? (
+        <>
+          <OutlineTree nodes={outline.tree} />
+          {outline.flat.length > 0 ? (
+            <details className="outline-node" open>
+              <summary>Unstructured</summary>
+              <OutlineConceptItems concepts={outline.flat} />
+            </details>
+          ) : null}
+        </>
       ) : (
         (() => {
           const grouped = groupByCategory(concepts);
