@@ -5,6 +5,7 @@ from mslearn.adapters.base import SourceDocument
 from mslearn.adapters.blog import load_blog
 from mslearn.adapters.epub import load_epub
 from mslearn.adapters.pdf import load_pdf
+from mslearn.adapters.text import load_text
 
 _YOUTUBE_HOSTS = ("youtube.com", "youtu.be")
 _SUFFIX_TYPES = {
@@ -47,6 +48,8 @@ def load_source(
         return load_epub(ref, role)
     if stype == "blog":
         return load_blog(ref, role)
+    if stype == "text":
+        return load_text(ref, role)
     if stype == "youtube":
         from mslearn.adapters.youtube import load_youtube  # keeps yt deps lazy
 
