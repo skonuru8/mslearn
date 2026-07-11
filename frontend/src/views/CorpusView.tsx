@@ -74,6 +74,7 @@ export function CorpusView() {
   const [linkRef, setLinkRef] = useState("");
   const [isMainCourse, setIsMainCourse] = useState(true);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [mainSourceIndex, setMainSourceIndex] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [uploadIndex, setUploadIndex] = useState<{ current: number; total: number } | null>(null);
@@ -197,7 +198,9 @@ export function CorpusView() {
   }, [sources, refreshSources]);
 
   function onFilesChosen(files: FileList | null) {
-    setUploadFiles(files ? Array.from(files) : []);
+    const arr = files ? Array.from(files) : [];
+    setUploadFiles(arr);
+    setMainSourceIndex(arr.length ? 0 : null);
     setUserError(null);
   }
 
@@ -392,24 +395,43 @@ export function CorpusView() {
           </button>
         </div>
 
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={isMainCourse}
-            onChange={(event) => {
-              spineTouched.current = true;
-              setIsMainCourse(event.target.checked);
-            }}
-          />
-          <span>
-            <strong>Is this your main book or course?</strong>
-            <span className="hint">
-              {hasSpine
-                ? "You already have a main course — leave this off for extra reading, or turn it on to add this to the main course too."
-                : "Turn on for your primary textbook or course videos. Turn off for extra articles or side readings."}
+        {uploadFiles.length > 1 ? null : (
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={isMainCourse}
+              onChange={(event) => {
+                spineTouched.current = true;
+                setIsMainCourse(event.target.checked);
+              }}
+            />
+            <span>
+              <strong>Is this your main book or course?</strong>
+              <span className="hint">
+                {hasSpine
+                  ? "You already have a main course — leave this off for extra reading, or turn it on to add this to the main course too."
+                  : "Turn on for your primary textbook or course videos. Turn off for extra articles or side readings."}
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+        )}
+
+        {uploadFiles.length > 1 ? (
+          <fieldset className="main-source-picker">
+            <legend>Which of these is your main source? The rest become extra reading.</legend>
+            {uploadFiles.map((file, i) => (
+              <label key={i}>
+                <input
+                  type="radio"
+                  name="main-source"
+                  checked={i === mainSourceIndex}
+                  onChange={() => setMainSourceIndex(i)}
+                />
+                {file.name}
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
 
         {addTab === "file" ? (
           <form className="form-grid" onSubmit={(event) => void onUpload(event)}>

@@ -218,6 +218,32 @@ describe("CorpusView", () => {
     expect(screen.getByRole("button", { name: "Add 2 files" })).toBeTruthy();
   });
 
+  it("shows a main-source picker when multiple files are selected", async () => {
+    installFetchMock(corpusHandlers([]));
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(["a"], "one.pdf", { type: "application/pdf" }),
+      new File(["b"], "two.pdf", { type: "application/pdf" }),
+      new File(["c"], "three.pdf", { type: "application/pdf" }),
+    ];
+    await userEvent.upload(input, files);
+
+    await screen.findByText(/which of these is your main source/i);
+    const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios).toHaveLength(3);
+    expect(radios[0]!.checked).toBe(true);
+    expect(radios[1]!.checked).toBe(false);
+    expect(radios[2]!.checked).toBe(false);
+
+    await userEvent.click(radios[1]!);
+    expect(radios[0]!.checked).toBe(false);
+    expect(radios[1]!.checked).toBe(true);
+    expect(radios[2]!.checked).toBe(false);
+  });
+
   it("shows error banner on 422 ingest", async () => {
     installFetchMock({
       ...corpusHandlers(),
