@@ -171,6 +171,16 @@ PROMPTS: dict[str, str] = {
         "Markdown:\n{markdown}\n"
         "Return JSON: clarity_1_5, grounding_1_5, tension_handled (bool)."
     ),
+    "rubric_guide": (
+        "Score a study-guide JSON for one concept.\n"
+        "Concept: {concept_name}\nSummary: {concept_summary}\nGuide JSON:\n{guide}\n"
+        "Return JSON: {{\"depth_1_5\": n, \"redundancy_1_5\": n,"
+        " \"category_fit_1_5\": n, \"grounding_1_5\": n}}.\n"
+        "depth: sections explain (what/why/how/example) vs restate in one line.\n"
+        "redundancy: HIGH score = little repetition of the summary or between sections.\n"
+        "category_fit: concept fits a coherent category.\n"
+        "grounding: every item ties to a real claim.\n"
+    ),
     "provenance_check": (
         "Given markdown and source claims, detect unsupported factual statements.\n"
         "Markdown:\n{markdown}\n"
