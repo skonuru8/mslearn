@@ -41,6 +41,23 @@ def test_long_unit_splits_into_bounded_chunks():
         assert estimate_tokens(c.text) <= CHUNK_TARGET_TOKENS
 
 
+def test_chunks_inherit_unit_section_path():
+    doc = SourceDocument(
+        source_id="src", source_type="pdf", role="spine", title="t",
+        units=[
+            StructuralUnit(0, "u0", "Short paragraph one.", Locator(kind="page", page=1),
+                            section_path=("Ch1", "1.1")),
+            StructuralUnit(1, "u1", "Short paragraph two.", Locator(kind="page", page=2)),
+        ],
+    )
+    chunks = chunk_source(doc)
+    by_unit = {}
+    for c in chunks:
+        by_unit.setdefault(c.unit_index, []).append(c)
+    assert all(c.section_path == ("Ch1", "1.1") for c in by_unit[0])
+    assert all(c.section_path == () for c in by_unit[1])
+
+
 unit_texts = st.lists(
     st.text(
         alphabet=st.characters(blacklist_categories=("Cs",)),

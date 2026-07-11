@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 
-from mslearn.adapters.base import Locator, SourceDocument
+from mslearn.adapters.base import Locator, SourceDocument, StructuralUnit
 
 CHUNK_TARGET_TOKENS = 500
 
@@ -18,6 +18,7 @@ class Chunk:
     seq: int
     text: str
     locator: Locator
+    section_path: tuple[str, ...] = ()
 
 
 def _paragraphs(text: str) -> list[str]:
@@ -51,13 +52,14 @@ def _split_oversize(paragraph: str) -> list[str]:
 def chunk_source(doc: SourceDocument) -> list[Chunk]:
     chunks: list[Chunk] = []
 
-    def emit(unit_index: int, locator: Locator, buf: list[str]) -> None:
+    def emit(unit: StructuralUnit, buf: list[str]) -> None:
         seq = len(chunks)
         chunks.append(
             Chunk(
                 chunk_id=f"{doc.source_id}:{seq}", source_id=doc.source_id,
-                unit_index=unit_index, seq=seq,
-                text="\n\n".join(buf), locator=locator,
+                unit_index=unit.index, seq=seq,
+                text="\n\n".join(buf), locator=unit.locator,
+                section_path=unit.section_path,
             )
         )
 
@@ -72,9 +74,9 @@ def chunk_source(doc: SourceDocument) -> list[Chunk]:
         buf: list[str] = []
         for piece in pieces:
             if buf and estimate_tokens("\n\n".join([*buf, piece])) > CHUNK_TARGET_TOKENS:
-                emit(unit.index, unit.locator, buf)
+                emit(unit, buf)
                 buf = []
             buf.append(piece)
         if buf:
-            emit(unit.index, unit.locator, buf)
+            emit(unit, buf)
     return chunks

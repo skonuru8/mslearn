@@ -20,6 +20,7 @@ class StructuralUnit:
     title: str
     text: str
     locator: Locator
+    section_path: tuple[str, ...] = ()
 
 
 @dataclass
