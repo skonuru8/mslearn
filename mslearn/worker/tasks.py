@@ -14,6 +14,7 @@ from mslearn.pipeline.extraction_graph import run_extraction
 from mslearn.pipeline.guide_gen import generate_guide
 from mslearn.pipeline.synthesis import (
     assign_categories,
+    assign_sections,
     build_curriculum,
     cluster_new_claims,
     process_dirty_concepts,
@@ -374,6 +375,7 @@ def synthesize_task(project_id: str = "default"):
         ctx.db.set_project_setting(project_id, "synthesis:running_since", str(int(now)))
         _write_synthesis_progress(ctx.db, project_id, phase="ordering", done=0, total=0, ts=now)
         ordered = build_curriculum(ctx, project_id)
+        assign_sections(ctx, project_id)
         assign_categories(ctx, project_id)
     except SoftTimeLimitExceeded:
         logger.warning("synthesis exceeded soft time limit for project %s", project_id)

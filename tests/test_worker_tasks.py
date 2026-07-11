@@ -507,6 +507,7 @@ def test_synthesis_sets_and_clears_running_since(ctx, monkeypatch):
     monkeypatch.setattr(worker_tasks, "cluster_new_claims", snapshot)
     monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "assign_sections", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
     worker_tasks.synthesize_task.delay("default").get()
     assert seen["during"]  # set while running
@@ -532,6 +533,7 @@ def test_synthesis_sets_and_clears_progress(ctx, monkeypatch):
     monkeypatch.setattr(worker_tasks, "cluster_new_claims", snapshot_grouping)
     monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "build_curriculum", snapshot_ordering)
+    monkeypatch.setattr(worker_tasks, "assign_sections", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
     worker_tasks.synthesize_task.delay("default").get()
     assert seen["grouping"]["phase"] == "grouping"
@@ -575,6 +577,7 @@ def test_synthesis_heartbeat_refreshes_between_phases(ctx, monkeypatch):
     monkeypatch.setattr(worker_tasks, "cluster_new_claims", cluster)
     monkeypatch.setattr(worker_tasks, "process_dirty_concepts", process)
     monkeypatch.setattr(worker_tasks, "build_curriculum", curriculum)
+    monkeypatch.setattr(worker_tasks, "assign_sections", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
     worker_tasks.synthesize_task.delay("default").get()
     assert seen == ["1000", "2000", "3000"]  # strictly increasing heartbeat, one per phase boundary
@@ -597,6 +600,7 @@ def test_synthesis_success_clears_last_error(ctx, monkeypatch):
     monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: [])
     monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "assign_sections", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
     worker_tasks.synthesize_task.delay("default").get()
     assert not context.db.get_project_setting("default", "synthesis:last_error")
@@ -655,6 +659,7 @@ def test_synthesize_task_start_clears_queued_marker(ctx, monkeypatch):
     monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: [])
     monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "assign_sections", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
     worker_tasks.synthesize_task.delay("default").get()
     assert context.db.get_project_setting("default", "synthesis:queued") is None

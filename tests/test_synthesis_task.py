@@ -212,6 +212,7 @@ def test_synthesize_task_enqueues_warm_guides_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: set())
     monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "assign_sections", lambda c, p: 0)
     monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
 
     calls = []
@@ -222,6 +223,31 @@ def test_synthesize_task_enqueues_warm_guides_on_success(tmp_path, monkeypatch):
     worker_tasks.synthesize_task.delay("default").get()
 
     assert calls == ["default"]
+
+
+def test_synthesize_task_runs_assign_sections(tmp_path, monkeypatch):
+    # assign_sections must actually run as part of synthesize_task (between
+    # build_curriculum and assign_categories) -- not just be importable.
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name="A"))
+    graph.chunks["c1"] = {
+        "chunk_id": "c1", "source_id": "s1", "seq": 0,
+        "section_path": json.dumps(["Ch1", "1.1"]), "project_id": "default",
+    }
+    graph.add_claim("cl1", "text", "neutral", "s1", [0.1], chunk_id="c1")
+    graph.assign_claim("cl1", "k1")
+    set_context(PipelineContext(settings=None, db=db, router=None, graph=graph))
+
+    monkeypatch.setattr(worker_tasks, "cluster_new_claims", lambda c, p: set())
+    monkeypatch.setattr(worker_tasks, "process_dirty_concepts", lambda c, p: 0)
+    monkeypatch.setattr(worker_tasks, "build_curriculum", lambda c, p: [])
+    monkeypatch.setattr(worker_tasks, "assign_categories", lambda c, p: 0)
+    monkeypatch.setattr(worker_tasks.warm_guides_task, "delay", lambda project_id: None)
+
+    worker_tasks.synthesize_task.delay("default").get()
+
+    assert graph.get_concept("k1")["section_path"] == ["Ch1", "1.1"]
 
 
 def test_synthesize_task_skips_warm_guides_on_failure(tmp_path, monkeypatch):
