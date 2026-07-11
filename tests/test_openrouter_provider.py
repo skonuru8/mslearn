@@ -47,6 +47,15 @@ def test_complete_sends_auth_and_returns_cost():
 
 
 @respx.mock
+def test_ssl_error_is_transient_and_retryable():
+    import ssl
+
+    respx.post(URL).mock(side_effect=ssl.SSLError("[SSL: SSLV3_ALERT_BAD_RECORD_MAC] sslv3 alert bad record mac"))
+    with pytest.raises(ProviderTransientError):
+        OpenRouterProvider("sk-test").complete("m", req())
+
+
+@respx.mock
 def test_complete_with_schema_sends_response_format_and_parses():
     schema = {"type": "object", "properties": {"a": {"type": "integer"}}}
     route = respx.post(URL).respond(json=ok_body('{"a": 2}'))

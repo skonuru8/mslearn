@@ -81,6 +81,12 @@ class GraphStore:
             raise GraphWriteError(f"write changed nothing: {query[:120]}")
         return counters
 
+    def run_write_returning(self, query: str, **params) -> list[dict]:
+        with self._driver.session() as session:
+            return session.execute_write(
+                lambda tx: [dict(r) for r in tx.run(query, **params)]
+            )
+
     def run_read(self, query: str, **params) -> list[dict]:
         with self._driver.session() as session:
             return session.execute_read(
@@ -209,14 +215,23 @@ class GraphStore:
 
     # -- claims -----------------------------------------------------------
     def upsert_claim(self, claim, embedding: list[float], *, project_id: str = "default") -> None:
-        """No-op if the Chunk node doesn't exist — caller must ensure it was upserted first."""
-        self.run_write_checked(
+        """Upsert a claim and its EXTRACTED_FROM edge to its chunk.
+
+        Raises GraphWriteError only when the Chunk node is genuinely missing
+        (the MATCH returns no row). An idempotent re-commit of an already-present
+        identical claim — the same claim text extracted from two sources, or a
+        Celery task redelivery of an already-processed chunk — legitimately
+        changes nothing in the graph; that is a benign no-op, NOT a failure, so
+        we check the MATCH via RETURN instead of counters.contains_updates.
+        """
+        rows = self.run_write_returning(
             "MATCH (ch:Chunk {chunk_id: $chunk_id, project_id: $project_id}) "
             "MERGE (c:Claim {claim_id: $claim_id, project_id: $project_id}) "
             "SET c.text = $text, c.stance = $stance, c.quote = $quote, "
             "c.trust = $trust, c.source_id = $source_id, c.embedding = $embedding, "
             "c.kind = $kind "
-            "MERGE (c)-[:EXTRACTED_FROM]->(ch)",
+            "MERGE (c)-[:EXTRACTED_FROM]->(ch) "
+            "RETURN ch.chunk_id AS chunk_id",
             chunk_id=claim.chunk_id,
             project_id=project_id,
             claim_id=claim.claim_id,
@@ -228,6 +243,10 @@ class GraphStore:
             embedding=embedding,
             kind=getattr(claim, "kind", "claim"),
         )
+        if not rows:
+            raise GraphWriteError(
+                f"upsert_claim: chunk {claim.chunk_id!r} not found for claim {claim.claim_id!r}"
+            )
 
     def claims_for_source(self, source_id: str, *, project_id: str = "default") -> list[dict]:
         return self.run_read(

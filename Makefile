@@ -54,7 +54,7 @@ graph-test:
 # on machines with embed headroom (e.g. OLLAMA_NUM_PARALLEL >= that many).
 # Run all three (e.g. `make worker`, or `make run` for the full app).
 worker-prepare:
-	.venv/bin/celery -A mslearn.worker.app worker -Q prepare --concurrency=$${MSL_PREPARE_CONCURRENCY:-2} -n prepare@%h -l info
+	.venv/bin/celery -A mslearn.worker.app worker -Q prepare --concurrency=$${MSL_PREPARE_CONCURRENCY:-8} -n prepare@%h -l info
 
 worker-extract:
 	.venv/bin/celery -A mslearn.worker.app worker -Q extract --pool=threads --concurrency=$${MSL_EXTRACT_CONCURRENCY:-8} -n extract@%h -l info

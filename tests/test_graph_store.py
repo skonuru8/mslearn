@@ -39,6 +39,35 @@ def test_get_chunk(clean_graph):
     assert clean_graph.get_chunk("missing") is None
 
 
+def test_upsert_claim_is_idempotent_and_flags_missing_chunk(clean_graph):
+    from mslearn.chunking import chunk_source
+    from mslearn.graph.records import ClaimRecord
+    from mslearn.graph.store import GraphWriteError
+    from tests.test_graph_ingest import embed_stub, make_doc
+
+    doc = make_doc()
+    chunks = chunk_source(doc)
+    clean_graph.upsert_source(doc)
+    clean_graph.upsert_chunks(chunks, embed_stub(chunks))
+    chunk_id = chunks[0].chunk_id
+    record = ClaimRecord(
+        claim_id="cl1", chunk_id=chunk_id, source_id=doc.source_id,
+        text="A grounded fact.", stance="neutral", quote="fact", trust="trusted",
+    )
+    emb = [0.1] * 768
+    # First commit creates it; a second identical commit (duplicate claim text
+    # across sources, or a Celery redelivery) is a benign no-op, not an error.
+    clean_graph.upsert_claim(record, emb)
+    clean_graph.upsert_claim(record, emb)  # must not raise
+    # A genuinely missing chunk is still an error.
+    orphan = ClaimRecord(
+        claim_id="cl2", chunk_id="nope:0", source_id=doc.source_id,
+        text="x", stance="neutral", quote="x", trust="trusted",
+    )
+    with pytest.raises(GraphWriteError):
+        clean_graph.upsert_claim(orphan, emb)
+
+
 def test_set_and_read_concept_category(clean_graph):
     from mslearn.graph.records import ConceptRecord
 

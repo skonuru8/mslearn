@@ -1,4 +1,5 @@
 import json
+import ssl
 import time
 from typing import Iterator
 
@@ -86,7 +87,12 @@ class OpenRouterProvider(ModelProvider):
             if exc.response.status_code >= 500 or exc.response.status_code == 429:
                 raise ProviderTransientError(str(exc)) from exc
             raise ProviderError(str(exc)) from exc
-        except httpx.TransportError as exc:
+        except (httpx.TransportError, ssl.SSLError) as exc:
+            # SSL errors (e.g. SSLV3_ALERT_BAD_RECORD_MAC — a corrupted TLS
+            # record under connection-pool churn at high concurrency) are
+            # transient network faults, not permanent failures. httpx usually
+            # wraps them as TransportError, but a raw ssl.SSLError can leak
+            # through mid-read; either way, retry rather than fail the source.
             raise ProviderTransientError(str(exc)) from exc
 
     def complete(self, model: str, request: ModelRequest) -> ModelResponse:
@@ -178,7 +184,12 @@ class OpenRouterProvider(ModelProvider):
             if exc.response.status_code >= 500 or exc.response.status_code == 429:
                 raise ProviderTransientError(str(exc)) from exc
             raise ProviderError(str(exc)) from exc
-        except httpx.TransportError as exc:
+        except (httpx.TransportError, ssl.SSLError) as exc:
+            # SSL errors (e.g. SSLV3_ALERT_BAD_RECORD_MAC — a corrupted TLS
+            # record under connection-pool churn at high concurrency) are
+            # transient network faults, not permanent failures. httpx usually
+            # wraps them as TransportError, but a raw ssl.SSLError can leak
+            # through mid-read; either way, retry rather than fail the source.
             raise ProviderTransientError(str(exc)) from exc
         if not yielded:
             # A stream that only carried reasoning deltas (no `content`) ends
