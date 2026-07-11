@@ -188,7 +188,6 @@ export function ConceptView() {
   return (
     <section className="panel">
       <h1>{detail.concept.name}</h1>
-      <p>{detail.concept.summary}</p>
       <ErrorBanner message={error} />
       <button type="button" onClick={() => void load(true)} disabled={loading}>
         Regenerate teaching

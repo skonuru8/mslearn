@@ -114,6 +114,35 @@ describe("ConceptView", () => {
     expect(screen.getByText(/Caches speed up reads\./)).toBeInTheDocument();
   });
 
+  it("does not double-render the concept summary in the header", async () => {
+    // The concept's one-liner summary must appear only through the guide's
+    // lede (tl_dr), not again as a standalone <p> under the <h1>.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => conceptDetailBody() })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => teachBody({
+          guide: {
+            ...teachBody().guide,
+            tl_dr: { text: "Stale data", claims: ["c1"] },
+          },
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/concepts/k1"]}>
+        <Routes>
+          <Route path="/concepts/:id" element={<ConceptView />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: "Cache" });
+    expect(screen.getAllByText(/Stale data/)).toHaveLength(1);
+  });
+
   it("toggles section reviewed and posts to /progress", async () => {
     const fetchMock = vi
       .fn()
