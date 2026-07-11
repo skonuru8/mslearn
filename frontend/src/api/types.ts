@@ -193,6 +193,12 @@ export interface Disagreement {
   b: DisagreeSide;
 }
 
+export interface InterpretationItem {
+  angle: string;
+  text: string;
+  claims: string[];
+}
+
 export interface StudyGuide {
   concept_id: string;
   title: string;
@@ -201,6 +207,7 @@ export interface StudyGuide {
   sections: GuideSection[];
   disagreements: Disagreement[];
   open_questions: string[];
+  interpretation?: InterpretationItem[];
 }
 
 export interface TeachResponse {
