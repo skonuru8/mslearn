@@ -78,13 +78,8 @@ GUIDE_SCHEMA: dict = {
                 "claims": {"type": "array", "items": {"type": "string"}}},
                 "required": ["kind", "text", "claims"], "additionalProperties": False}}},
             "required": ["id", "title", "items"], "additionalProperties": False}},
-        "open_questions": {"type": "array", "items": {"type": "string"}},
-        "interpretation": {"type": "array", "items": {"type": "object", "properties": {
-            "angle": {"enum": list(INTERPRETATION_ANGLES)}, "text": {"type": "string"},
-            "claims": {"type": "array", "items": {"type": "string"}}},
-            "required": ["angle", "text", "claims"], "additionalProperties": False}},
     },
-    "required": ["concept_id", "title", "tl_dr", "skeleton", "sections", "open_questions"],
+    "required": ["concept_id", "title", "tl_dr", "skeleton", "sections"],
     "additionalProperties": False,
 }
 
@@ -112,8 +107,6 @@ def drop_ungrounded(guide: StudyGuide) -> StudyGuide:
             guide.tl_dr.claims = first_cited.claims
         else:
             guide.tl_dr.text = ""
-    # interpretation items are labeled model analysis, not source facts —
-    # they are kept regardless of whether they carry claim citations.
     return guide
 
 # guide_gen.py still imports drop_uncited; keep this alias so it keeps

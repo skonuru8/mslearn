@@ -104,32 +104,6 @@ def test_generate_guide_drops_uncited_and_adds_disagreements(fake_ctx):
     assert "c4" not in disagreement["b"]["label"]
 
 
-def test_generate_guide_includes_interpretation(tmp_path):
-    payload = dict(GUIDE_OUTPUT)
-    payload["sections"] = [
-        {
-            "id": "s1",
-            "title": "Cost",
-            "items": [
-                {"kind": "claim", "text": "It sorts by splitting and merging, giving log-linear cost.", "claims": ["c3"]},
-            ],
-        }
-    ]
-    payload["interpretation"] = [
-        {"angle": "verdict", "text": "The complexity claim holds up given the divide-and-conquer structure.", "claims": ["c3"]},
-        {"angle": "synthesis", "text": "Overall this suggests a solid default sort for large inputs.", "claims": []},
-    ]
-    router = ScriptedRouter(outputs=[payload])
-    ctx = make_ctx(tmp_path, router)
-
-    out, _cached = generate_guide(ctx, "con1", force=True)
-
-    assert "interpretation" in out
-    angles = {item["angle"] for item in out["interpretation"]}
-    assert angles == {"verdict", "synthesis"}
-    assert len(out["interpretation"]) == 2
-
-
 def test_generate_guide_uses_drop_ungrounded(tmp_path):
     payload = dict(GUIDE_OUTPUT)
     payload["sections"] = [
@@ -142,9 +116,6 @@ def test_generate_guide_uses_drop_ungrounded(tmp_path):
             ],
         }
     ]
-    payload["interpretation"] = [
-        {"angle": "synthesis", "text": "An uncited but legitimate analysis observation.", "claims": []},
-    ]
     router = ScriptedRouter(outputs=[payload])
     ctx = make_ctx(tmp_path, router)
 
@@ -153,9 +124,6 @@ def test_generate_guide_uses_drop_ungrounded(tmp_path):
     section_texts = [item["text"] for sec in out["sections"] for item in sec["items"]]
     assert "an uncited hallucinated fact" not in section_texts
     assert all(item["claims"] for sec in out["sections"] for item in sec["items"])
-    # interpretation is untouched by the grounded-items gate
-    assert len(out["interpretation"]) == 1
-    assert out["interpretation"][0]["angle"] == "synthesis"
 
 
 def test_generate_guide_memory_failure_degrades(fake_ctx_raising_memory):

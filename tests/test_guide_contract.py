@@ -93,3 +93,24 @@ def test_interpretation_angle_validated():
 def test_parse_guide_without_interpretation_ok():
     g = parse_guide(RAW)
     assert g.interpretation == []
+
+
+def test_guide_schema_omits_open_questions_and_interpretation():
+    from mslearn.pipeline.guide import GUIDE_SCHEMA
+    props = GUIDE_SCHEMA["properties"]
+    assert "open_questions" not in props
+    assert "interpretation" not in props
+    assert "open_questions" not in GUIDE_SCHEMA["required"]
+
+
+def test_cached_guide_with_legacy_fields_still_parses():
+    from mslearn.pipeline.guide import parse_guide
+    legacy = {
+        "concept_id": "c", "title": "T",
+        "tl_dr": {"text": "x", "claims": ["c1"]},
+        "skeleton": ["S"], "sections": [], "disagreements": [],
+        "open_questions": ["old q"],
+        "interpretation": [{"angle": "verdict", "text": "y", "claims": []}],
+    }
+    guide = parse_guide(legacy)
+    assert guide.title == "T"
