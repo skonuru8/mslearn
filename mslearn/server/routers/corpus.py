@@ -13,7 +13,7 @@ from mslearn.prompts import get_domain_profile
 from mslearn.server.deps import get_ctx, get_project_id
 from mslearn.worker.app import app as celery_app
 from mslearn.worker.app import worker_online
-from mslearn.worker.tasks import try_enqueue_synthesis
+from mslearn.worker.tasks import chunk_source_task, try_enqueue_synthesis
 
 router = APIRouter(prefix="/api/corpus", tags=["corpus"])
 
@@ -197,6 +197,32 @@ def retry_failed_source(
     ctx.db.set_source_status(source_id, "running", clear_error=True)
     resume_pending(project_id)
     return {"source_id": source_id, "status": "running", "retried_chunks": len(reset_ids)}
+
+
+@router.post("/sources/{source_id}/retry")
+def retry_source(
+    source_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)
+):
+    """Retry a source, choosing the right recovery based on how far it got.
+
+    A source that never produced any chunks (status "failed", total_chunks
+    == 0 — the adapter load itself blew up: SSL error, 403, bad file, etc.)
+    has nothing for the chunk-level retry to resume, so the whole prepare
+    step is re-run from scratch (mirrors ingest_source's enqueue). A source
+    that has chunks but some failed reuses the existing failed-chunk retry
+    path (see retry_failed_source above).
+    """
+    row = ctx.db.source_row(source_id, project_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"unknown source {source_id!r}")
+    if row["status"] == "failed" and row["total_chunks"] == 0:
+        ctx.db.set_source_status(source_id, "chunking", clear_error=True)
+        chunk_source_task.delay(project_id, source_id, row["ref"], row["role"], None, True)
+        return {"source_id": source_id, "mode": "reload"}
+    reset_ids = ctx.db.reset_failed_chunks(source_id)
+    ctx.db.set_source_status(source_id, "running", clear_error=True)
+    resume_pending(project_id)
+    return {"source_id": source_id, "mode": "chunks", "retried_chunks": len(reset_ids)}
 
 
 @router.get("/settings/domain-profile")
