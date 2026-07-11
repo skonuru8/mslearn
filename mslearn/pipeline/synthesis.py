@@ -572,6 +572,35 @@ def assign_categories(ctx, project_id: str = "default") -> int:
     return len(pairs)
 
 
+def assign_sections(ctx, project_id: str = "default") -> int:
+    """Roll each concept's claims' chunk section_path up to a home
+    section_path on the concept: the most frequent non-empty path among its
+    claims' chunks, tie-broken by earliest chunk seq. When a concept gets a
+    non-empty section_path, its category is reconciled to section_path[0]
+    (the top chapter) so category grouping stays consistent with structure.
+    Concepts whose claims are all structure-less are left untouched. Returns
+    the number of concepts assigned a non-empty section_path."""
+    graph = ctx.graph
+    paths_by_concept = graph.concept_section_paths(project_id=project_id)
+
+    section_pairs: list[tuple[str, list[str]]] = []
+    category_pairs: list[tuple[str, str]] = []
+    for concept_id, entries in paths_by_concept.items():
+        counts: dict[tuple[str, ...], list[int]] = defaultdict(list)
+        for path, seq in entries:
+            if path:
+                counts[tuple(path)].append(seq)
+        if not counts:
+            continue
+        best_path = max(counts.items(), key=lambda kv: (len(kv[1]), -min(kv[1])))[0]
+        section_pairs.append((concept_id, list(best_path)))
+        category_pairs.append((concept_id, best_path[0]))
+
+    graph.set_concept_sections(section_pairs, project_id=project_id)
+    graph.set_concept_categories(category_pairs, project_id=project_id)
+    return len(section_pairs)
+
+
 def _ensure_concept(graph, known_concepts: set[str], concept_id: str, *, project_id: str = "default") -> None:
     if concept_id in known_concepts:
         return
