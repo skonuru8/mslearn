@@ -81,6 +81,15 @@ PROMPTS: dict[str, str] = {
         "- Include only prerequisite edges.\n"
         "- Avoid cycles; if unsure, return fewer edges.\n"
     ),
+    "concept_categories": (
+        "You group numbered study concepts into a few coherent categories.\n"
+        "Return JSON only: {\"categories\": [{\"name\": \"<2-4 words>\","
+        " \"concept_ids\": [\"...\"]}]}\n"
+        "Rules:\n"
+        "- Use only the provided concept ids; assign each to exactly one category.\n"
+        "- Aim for 2-8 categories; group by subject, not by order.\n"
+        "- Category names are short and human-readable.\n"
+    ),
     "teach_concept": (
         "You write detailed, comprehensive study notes for one concept using only "
         "the supplied cited claims.\n"

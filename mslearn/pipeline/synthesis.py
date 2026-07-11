@@ -20,6 +20,8 @@ _CONCEPT_NAME_SCHEMA = {
     "properties": {"name": {"type": "string"}, "summary": {"type": "string"}},
 }
 _CONCEPT_DEPS_SCHEMA = {"type": "object", "properties": {"edges": {"type": "array"}}}
+_CONCEPT_CATEGORIES_SCHEMA = {"type": "object", "properties": {"categories": {"type": "array"}}}
+_MAX_CATEGORIZE_CONCEPTS = 200
 
 
 def _resolve_match(value, candidate_ids: list[str]) -> str | None:
@@ -523,6 +525,53 @@ def build_curriculum(ctx, project_id: str = "default") -> list[str]:
     return ordered
 
 
+def assign_categories(ctx, project_id: str = "default") -> int:
+    graph = ctx.graph
+    db = ctx.db
+    concepts = list(graph.all_concepts(project_id=project_id))
+    valid_ids = {c["concept_id"] for c in concepts}
+    if not (2 <= len(concepts) <= _MAX_CATEGORIZE_CONCEPTS):
+        return 0
+    prompt = get_prompt(db, "concept_categories")
+    try:
+        response = ctx.router.complete(
+            "synthesis",
+            ModelRequest(
+                messages=[
+                    ModelMessage(
+                        role="user",
+                        content=_concept_categories_prompt(prompt, concepts),
+                    )
+                ],
+                json_schema=_CONCEPT_CATEGORIES_SCHEMA,
+                max_tokens=int(db.get_tunable("synth.max_tokens")),
+            ),
+        )
+    except ProviderBadOutputError:
+        # A malformed/truncated concept_categories response must not crash
+        # synthesis -- leave categories empty and let the curriculum render
+        # flat.
+        logger.warning("concept_categories call failed; leaving categories empty")
+        return 0
+    parsed = response.parsed if isinstance(response.parsed, dict) else {}
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for group in parsed.get("categories", []):
+        if not isinstance(group, dict):
+            continue
+        name = str(group.get("name", "")).strip()
+        if not name:
+            continue
+        for concept_id in group.get("concept_ids", []):
+            if concept_id in valid_ids and concept_id not in seen:
+                pairs.append((concept_id, name))
+                seen.add(concept_id)
+    if not pairs:
+        return 0
+    graph.set_concept_categories(pairs, project_id=project_id)
+    return len(pairs)
+
+
 def _ensure_concept(graph, known_concepts: set[str], concept_id: str, *, project_id: str = "default") -> None:
     if concept_id in known_concepts:
         return
@@ -583,6 +632,13 @@ def _concept_deps_prompt(base: str, spine_ids: list[str], all_concepts: dict[str
     for idx, concept_id in enumerate(spine_ids, start=1):
         name = all_concepts.get(concept_id, {}).get("name", "")
         lines.append(f"{idx}. {concept_id} | {name}")
+    return "\n".join(lines)
+
+
+def _concept_categories_prompt(base: str, concepts: list[dict]) -> str:
+    lines = [base, "", "Concepts:"]
+    for idx, c in enumerate(concepts, start=1):
+        lines.append(f"{idx}. {c['concept_id']} | {c.get('name', '')}")
     return "\n".join(lines)
 
 
