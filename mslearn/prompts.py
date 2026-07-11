@@ -244,7 +244,26 @@ PROMPTS: dict[str, str] = {
         "Current metrics:\n{metrics}\n"
         "Current tunables:\n{tunables}\n"
         "Recent audit:\n{audit}\n"
+        "Patterns:\n{patterns}\n"
         "Return JSON proposals with kind, key, value/new_prompt, targets_metric, why."
+    ),
+    "patterns_summarize": (
+        "You cluster recurring problems from recent user feedback and rejected"
+        " self-improvement proposals into a small set of named failure patterns.\n"
+        "Recent negative feedback:\n{feedback}\n"
+        "Recently rejected evolution proposals:\n{rejected_history}\n"
+        "Return JSON only matching schema: {{\"patterns\": [{{\"name\": \"...\","
+        " \"symptom\": \"...\", \"evidence\": \"...\","
+        " \"suggested_target_metric\": \"...\"}}]}}.\n"
+        "Rules:\n"
+        "- Group related feedback/rejections into one pattern instead of listing"
+        " each individually.\n"
+        "- 'symptom' describes what the user or judge is seeing, in plain words.\n"
+        "- 'evidence' cites the concept ids, tags, or rejected proposal keys that"
+        " support the pattern.\n"
+        "- 'suggested_target_metric' is a real metric key (e.g. guide.depth,"
+        " feedback.wrong_rate) the pattern points at.\n"
+        "- If there is no clear recurring pattern, return {{\"patterns\": []}}.\n"
     ),
 }
 

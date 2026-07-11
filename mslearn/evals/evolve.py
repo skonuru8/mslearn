@@ -7,6 +7,7 @@ from dataclasses import replace
 from mslearn.evals.gates import GATES, gate_enforced
 from mslearn.evals.judged import provenance_violation_count
 from mslearn.evals.metrics import compute_component_metrics
+from mslearn.evals.patterns import mine_patterns
 from mslearn.evals.runner import run_eval
 from mslearn.prompts import PROMPTS, get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest
@@ -128,6 +129,10 @@ def evolve_once(ctx) -> dict:
     prompt = get_prompt(ctx.db, "evolve_propose")
     tunable_snapshot = {key: ctx.db.get_tunable(key) for key in TUNABLE_BOUNDS}
     audit_rows = ctx.db.tunable_history(next(iter(TUNABLE_BOUNDS)))
+    # Mined recurring failure patterns (negative feedback + rejected history)
+    # so the proposer targets real recurring problems, not just aggregate
+    # metrics. Best-effort: mine_patterns degrades to [] on bad model output.
+    patterns = mine_patterns(ctx)
     response = ctx.router.complete(
         "evals",
         ModelRequest(
@@ -138,6 +143,7 @@ def evolve_once(ctx) -> dict:
                         metrics=json.dumps(baseline, indent=2),
                         tunables=json.dumps(tunable_snapshot, indent=2),
                         audit=json.dumps(audit_rows[:5], indent=2),
+                        patterns=json.dumps(patterns, indent=2),
                     ),
                 )
             ],
