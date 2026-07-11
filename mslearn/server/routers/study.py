@@ -10,9 +10,18 @@ from mslearn.worker.tasks import synthesize_task
 router = APIRouter(prefix="/api/study", tags=["study"])
 quiz_router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 
+ALLOWED_FEEDBACK_TAGS = {"too_shallow", "repetitive", "wrong", "off_topic"}
+
 
 class FlagRequest(BaseModel):
     reason: str
+
+
+class FeedbackRequest(BaseModel):
+    helpful: bool | None = None
+    tags: list[str] = Field(default_factory=list)
+    comment: str = ""
+    guide_hash: str | None = None
 
 
 class ProgressRequest(BaseModel):
@@ -136,6 +145,32 @@ def flag_claim(
     ctx.graph.set_concept_teaching(concept_id, "", project_id=project_id)
     synthesize_task.delay(project_id)
     return {"claim_id": claim_id, "concept_id": concept_id, "status": "flagged"}
+
+
+@router.post("/concepts/{concept_id}/feedback")
+def submit_feedback(
+    concept_id: str,
+    body: FeedbackRequest,
+    ctx=Depends(get_ctx),
+    project_id: str = Depends(get_project_id),
+):
+    bad = [t for t in body.tags if t not in ALLOWED_FEEDBACK_TAGS]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"unknown tags {bad}")
+    ctx.db.add_note_feedback(
+        project_id,
+        concept_id,
+        helpful=body.helpful,
+        tags=body.tags,
+        comment=body.comment,
+        guide_hash=body.guide_hash,
+    )
+    return {"ok": True}
+
+
+@router.get("/concepts/{concept_id}/feedback")
+def get_feedback(concept_id: str, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)):
+    return ctx.db.feedback_for_concept(concept_id, project_id) or {}
 
 
 @quiz_router.get("/next")
