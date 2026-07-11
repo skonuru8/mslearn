@@ -22,6 +22,14 @@ def test_load_blog_html_paragraph_units():
     assert "Copyright" not in doc.full_text()  # boilerplate stripped
 
 
+def test_load_blog_html_units_carry_heading_section_path():
+    html = FIXTURE.read_text()
+    doc = load_blog_html(html, url="https://example.com/post")
+    # The fixture's only heading is the article's own h1 title, so every
+    # extracted paragraph nests under it.
+    assert all(u.section_path == ("Why Global State Hurts",) for u in doc.units)
+
+
 def test_no_content_raises():
     with pytest.raises(BlogExtractionError):
         load_blog_html("<html><body></body></html>", url="https://example.com/empty")
