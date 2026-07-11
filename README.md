@@ -27,12 +27,17 @@ Spec: `docs/superpowers/specs/2026-07-02-multi-source-learning-system-design.md`
 4. **You study.** Browse the curriculum and open a concept's **interactive
    guide** — a TL;DR, a mini-map outline, and stacked collapsible sections
    built entirely from trust-gated claims, color-coded by what each item
-   *is* (definition/claim/mechanism/example/caveat/actionable). Every
-   section has a "Sources" footer: numbered superscripts next to each
-   sentence expand to the exact quote and locator behind it (no raw claim-id
-   strings ever shown), and your "reviewed" progress per section is saved.
-   Where sources disagree, a two-column compare shows both sides side by
-   side. Pull **on-demand flashcards or a self-check quiz** for the concept
+   *is* (definition/claim/mechanism/example/caveat/actionable). Notes are
+   written in the app's own words, not copied verbatim from the source —
+   each one still traces back to a claim via its "Sources" footer, where
+   numbered superscripts next to each sentence expand to the exact quote
+   and locator behind it (no raw claim-id strings ever shown), and your
+   "reviewed" progress per section is saved. A separate, clearly labeled
+   **"Model's analysis — not from your source"** layer adds the model's
+   own reasoning (assumption/evidence/steelman/verdict/synthesis) — it's
+   never presented as something your source said. Where sources disagree,
+   a two-column compare shows both sides side by side. Pull **on-demand
+   flashcards or a self-check quiz** for the concept
    whenever you want them. Take reasoning quizzes graded with explanations,
    or just chat with your corpus — the app remembers what confused you and
    adapts. The guide is only as rich as the claims extracted from the
@@ -152,8 +157,9 @@ transcription is serialized (one at a time) to protect memory.
   Needs the worker running and at least some trusted claims in the graph.
 - **Curriculum / Concept** pages: ordered concepts; each concept opens an
   **interactive guide** (TL;DR, mini-map, kind-colored collapsible sections,
-  numbered source citations, "Where sources disagree" compare) with
-  per-section reviewed progress saved as you go, plus flagging. Pull
+  own-words notes with numbered source citations, a labeled "Model's
+  analysis" layer, "Where sources disagree" compare) with per-section
+  reviewed progress saved as you go, plus flagging. Pull
   **on-demand flashcards and a self-check quiz** for the concept whenever
   you want them — generated on request, cited, and only from claims that
   support them.
@@ -256,8 +262,13 @@ rollbackable (`POST /api/admin/tunables/{key}/rollback`).
   CONFLICTS_WITH{classification}`; native vector indexes (768-dim).
 - **Pipeline** (`mslearn/pipeline/`): LangGraph extraction graph
   (extract→validate→retry→escalate), synthesis (vector-blocked clustering with
-  judge verdicts → conflict scan → Kahn topological curriculum), and the
-  **guide generator** (`mslearn/pipeline/guide.py`, `guide_gen.py`) that
+  judge verdicts → conflict scan → Kahn topological curriculum) that degrades
+  piece-by-piece instead of failing the whole run when a single model call
+  errors or returns malformed JSON (falls back to no match / no conflict / a
+  generated name / natural order as needed), and skips the one-shot
+  dependency-ordering call for very large sources (>60 concepts) in favor of
+  natural order, and the **guide generator** (`mslearn/pipeline/guide.py`,
+  `guide_gen.py`) that
   organizes a concept's trust-gated claims into a grounded, schema-validated
   `StudyGuide` (TL;DR + sections + disagreements), dropping any item whose
   model output loses its citation. On-demand flashcards/self-check
