@@ -172,6 +172,52 @@ describe("CorpusView", () => {
     await screen.findByText("Already building your course — hang tight.");
   });
 
+  it("defaults the main-course checkbox off once a spine source exists", async () => {
+    installFetchMock(
+      corpusHandlers([
+        {
+          source_id: "s1",
+          ref: "book.pdf",
+          role: "spine",
+          status: "ready",
+          total_chunks: 3,
+          done_chunks: 3,
+          failed_chunks: 0,
+          rejected_chunks: 0,
+          error: null,
+          ts: 1,
+        },
+      ]),
+    );
+
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("book.pdf");
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: /Is this your main book or course/i,
+    }) as HTMLInputElement;
+    await waitFor(() => expect(checkbox.checked).toBe(false));
+    expect(screen.getByText(/You already have a main course/i)).toBeTruthy();
+  });
+
+  it("accepts multiple files and reflects the count", async () => {
+    installFetchMock(corpusHandlers([]));
+    renderWithProviders(<CorpusView />);
+    await screen.findByText("My materials");
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.multiple).toBe(true);
+
+    const files = [
+      new File(["a"], "one.pdf", { type: "application/pdf" }),
+      new File(["b"], "two.pdf", { type: "application/pdf" }),
+    ];
+    await userEvent.upload(input, files);
+
+    await screen.findByText("2 files selected");
+    expect(screen.getByRole("button", { name: "Add 2 files" })).toBeTruthy();
+  });
+
   it("shows error banner on 422 ingest", async () => {
     installFetchMock({
       ...corpusHandlers(),

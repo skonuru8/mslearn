@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, uploadSource } from "../api/client";
 import type {
@@ -73,9 +73,10 @@ export function CorpusView() {
   const [addTab, setAddTab] = useState<AddTab>("file");
   const [linkRef, setLinkRef] = useState("");
   const [isMainCourse, setIsMainCourse] = useState(true);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
+  const [uploadIndex, setUploadIndex] = useState<{ current: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
   const [failures, setFailures] = useState<Record<string, FailureGroup[]>>({});
@@ -84,6 +85,10 @@ export function CorpusView() {
   const [showSettings, setShowSettings] = useState(false);
 
   const role = isMainCourse ? "spine" : "supplement";
+  const hasSpine = sources.some((row) => row.role === "spine");
+  // Once the user manually toggles the main-course checkbox we stop
+  // re-deriving its default, so we don't fight their choice mid-session.
+  const spineTouched = useRef(false);
 
   function setUserError(message: string | null, technical: string | null = null) {
     setError(message);
@@ -130,6 +135,15 @@ export function CorpusView() {
     void load();
     void refreshSynthesisStatus();
   }, [load, refreshSynthesisStatus, projectId]);
+
+  // Default the main-course checkbox OFF once a spine source already exists,
+  // so a second upload doesn't silently join the main course. Only while the
+  // user hasn't manually toggled it this session.
+  useEffect(() => {
+    if (!spineTouched.current) {
+      setIsMainCourse(!hasSpine);
+    }
+  }, [hasSpine]);
 
   useEffect(() => {
     if (!synthesisStatus?.running_since) {
@@ -182,8 +196,8 @@ export function CorpusView() {
     };
   }, [sources, refreshSources]);
 
-  function onFileChosen(file: File | null) {
-    setUploadFile(file);
+  function onFilesChosen(files: FileList | null) {
+    setUploadFiles(files ? Array.from(files) : []);
     setUserError(null);
   }
 
@@ -206,6 +220,7 @@ export function CorpusView() {
         setSources([row, ...rows.filter((item) => item.source_id !== result.source_id)]);
       }
       setLinkRef("");
+      spineTouched.current = false;
       setUserError(null);
     } catch (err) {
       captureError(err, "Could not add that link");
@@ -214,24 +229,35 @@ export function CorpusView() {
 
   async function onUpload(event: FormEvent) {
     event.preventDefault();
-    if (!uploadFile) {
+    if (uploadFiles.length === 0) {
       setUserError("Choose a file first");
       return;
     }
     setUploading(true);
-    setUploadPercent(0);
-    try {
-      await uploadSource(uploadFile, role, false, (percent) => setUploadPercent(percent));
-      setUploadFile(null);
-      setUploadPercent(null);
-      await refreshSources();
-      setUserError(null);
-    } catch (err) {
-      captureError(err, "Upload failed");
-    } finally {
-      setUploading(false);
-      setUploadPercent(null);
+    const failed: string[] = [];
+    // Upload sequentially so per-file progress stays meaningful and one
+    // failure doesn't abort the rest of the batch.
+    for (let i = 0; i < uploadFiles.length; i += 1) {
+      const file = uploadFiles[i]!;
+      setUploadIndex({ current: i + 1, total: uploadFiles.length });
+      setUploadPercent(0);
+      try {
+        await uploadSource(file, role, false, (percent) => setUploadPercent(percent));
+      } catch {
+        failed.push(file.name);
+      }
     }
+    setUploadFiles([]);
+    setUploadPercent(null);
+    setUploadIndex(null);
+    spineTouched.current = false;
+    await refreshSources();
+    if (failed.length > 0) {
+      captureError(new Error(`These files failed to upload: ${failed.join(", ")}`), "Upload failed");
+    } else {
+      setUserError(null);
+    }
+    setUploading(false);
   }
 
   async function setStatus(sourceId: string, action: "pause" | "resume") {
@@ -370,13 +396,17 @@ export function CorpusView() {
           <input
             type="checkbox"
             checked={isMainCourse}
-            onChange={(event) => setIsMainCourse(event.target.checked)}
+            onChange={(event) => {
+              spineTouched.current = true;
+              setIsMainCourse(event.target.checked);
+            }}
           />
           <span>
             <strong>Is this your main book or course?</strong>
             <span className="hint">
-              Turn on for your primary textbook or course videos. Turn off for extra articles or
-              side readings.
+              {hasSpine
+                ? "You already have a main course — leave this off for extra reading, or turn it on to add this to the main course too."
+                : "Turn on for your primary textbook or course videos. Turn off for extra articles or side readings."}
             </span>
           </span>
         </label>
@@ -393,28 +423,41 @@ export function CorpusView() {
               onDrop={(event) => {
                 event.preventDefault();
                 setDragOver(false);
-                onFileChosen(event.dataTransfer.files?.[0] ?? null);
+                onFilesChosen(event.dataTransfer.files);
               }}
             >
-              <p>Drag and drop a PDF, EPUB, web page, audio, or image here</p>
+              <p>Drag and drop PDFs, EPUBs, web pages, audio, or images here</p>
               <label className="browse-label">
                 Browse
                 <input
                   type="file"
+                  multiple
                   accept=".pdf,.epub,.html,.htm,.mp3,.m4a,.wav,.flac,.ogg,.png,.jpg,.jpeg,.webp,.gif,.bmp,.heic"
-                  onChange={(event) => onFileChosen(event.target.files?.[0] ?? null)}
+                  onChange={(event) => onFilesChosen(event.target.files)}
                 />
               </label>
-              {uploadFile ? <p className="hint">Selected: {uploadFile.name}</p> : null}
+              {uploadFiles.length === 1 ? (
+                <p className="hint">Selected: {uploadFiles[0]!.name}</p>
+              ) : uploadFiles.length > 1 ? (
+                <p className="hint">{uploadFiles.length} files selected</p>
+              ) : null}
             </div>
             {uploadPercent !== null ? (
               <div className="upload-progress">
                 <progress max={100} value={uploadPercent} />
-                <span>Uploading… {uploadPercent}%</span>
+                <span>
+                  {uploadIndex && uploadIndex.total > 1
+                    ? `Uploading file ${uploadIndex.current} of ${uploadIndex.total}… ${uploadPercent}%`
+                    : `Uploading… ${uploadPercent}%`}
+                </span>
               </div>
             ) : null}
-            <button type="submit" className="primary" disabled={!uploadFile || uploading}>
-              {uploading ? "Uploading…" : "Add file"}
+            <button type="submit" className="primary" disabled={uploadFiles.length === 0 || uploading}>
+              {uploading
+                ? "Uploading…"
+                : uploadFiles.length > 1
+                  ? `Add ${uploadFiles.length} files`
+                  : "Add file"}
             </button>
           </form>
         ) : (
