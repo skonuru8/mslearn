@@ -207,3 +207,160 @@ def test_validate_proposal_missing_value_rejected_not_crash():
 
     error = validate_proposal({"kind": "tunable", "key": "trust.quote_threshold"})
     assert error is not None and "invalid or missing value" in error
+
+
+def test_evolve_tunable_proposal_passing_gates_auto_applies(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    db.create_eval_run("full", "abc", True)
+    router = ScriptedRouter(
+        [
+            {
+                "proposals": [
+                    {
+                        "kind": "tunable",
+                        "key": "trust.embed_sim_threshold",
+                        "value": 0.2,
+                        "targets_metric": "extraction.recall",
+                        "why": "loosen matching",
+                    }
+                ]
+            }
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=InMemoryGraphStore())
+    baseline = {
+        "extraction.precision": 0.9,
+        "extraction.recall": 0.85,
+        "grounding.false_accept": 0.01,
+        "clustering.f1": 0.8,
+        "tension.accuracy": 0.75,
+        "schema.validity": 0.99,
+    }
+    shadow = dict(baseline)
+    shadow["extraction.recall"] = 0.9
+    with patch("mslearn.evals.evolve.compute_component_metrics", side_effect=[baseline, shadow]):
+        summary = evolve_once(ctx)
+    assert summary["accepted"], summary
+    assert summary["pending"] == []
+    assert db.get_tunable("trust.embed_sim_threshold") == 0.2
+    assert db.pending_evolution_runs() == []
+
+
+def test_evolve_prompt_proposal_passing_gates_goes_pending_not_applied(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    db.create_eval_run("full", "abc", True)
+    new_rubric_teach = (
+        "Score teaching markdown thoroughly for concept {concept_name}.\n"
+        "Markdown:\n{markdown}\n"
+        "Return JSON: clarity_1_5, grounding_1_5, tension_handled (bool)."
+    )
+    router = ScriptedRouter(
+        [
+            {
+                "proposals": [
+                    {
+                        "kind": "prompt",
+                        "key": "prompt:rubric_teach",
+                        "new_prompt": new_rubric_teach,
+                        "targets_metric": "extraction.recall",
+                        "why": "clarify rubric",
+                    }
+                ]
+            }
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=InMemoryGraphStore())
+    baseline = {
+        "extraction.precision": 0.9,
+        "extraction.recall": 0.85,
+        "grounding.false_accept": 0.01,
+        "clustering.f1": 0.8,
+        "tension.accuracy": 0.75,
+        "schema.validity": 0.99,
+    }
+    shadow = dict(baseline)
+    shadow["extraction.recall"] = 0.9
+    with patch("mslearn.evals.evolve.compute_component_metrics", side_effect=[baseline, shadow]):
+        summary = evolve_once(ctx)
+    assert summary["accepted"] == []
+    assert len(summary["pending"]) == 1
+    assert db.get_setting("prompt:rubric_teach") is None  # never auto-applied
+    pending_rows = db.pending_evolution_runs()
+    assert len(pending_rows) == 1
+    assert pending_rows[0]["id"] == summary["pending"][0]["run_id"]
+
+
+def test_evolve_sample_gated_feedback_regression_not_enforced_below_floor(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    db.create_eval_run("full", "abc", True)
+    router = ScriptedRouter(
+        [
+            {
+                "proposals": [
+                    {
+                        "kind": "tunable",
+                        "key": "synth.similarity_floor",
+                        "value": 0.8,
+                        "targets_metric": "extraction.recall",
+                        "why": "tighten matching",
+                    }
+                ]
+            }
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=InMemoryGraphStore())
+    baseline = {
+        "extraction.precision": 0.9,
+        "extraction.recall": 0.85,
+        "grounding.false_accept": 0.01,
+        "clustering.f1": 0.8,
+        "tension.accuracy": 0.75,
+        "schema.validity": 0.99,
+        "feedback.wrong_rate": 0.5,
+        "feedback.total_rated": 3,  # below MIN_FEEDBACK_SAMPLES
+    }
+    shadow = dict(baseline)
+    shadow["extraction.recall"] = 0.9  # improved
+    shadow["feedback.wrong_rate"] = 0.8  # would regress the gate if enforced
+    with patch("mslearn.evals.evolve.compute_component_metrics", side_effect=[baseline, shadow]):
+        summary = evolve_once(ctx)
+    assert summary["accepted"], summary
+    assert db.get_tunable("synth.similarity_floor") == 0.8
+
+
+def test_evolve_sample_gated_feedback_regression_enforced_at_floor(tmp_path):
+    db = OpsDB(tmp_path / "ops.db")
+    db.create_eval_run("full", "abc", True)
+    router = ScriptedRouter(
+        [
+            {
+                "proposals": [
+                    {
+                        "kind": "tunable",
+                        "key": "synth.similarity_floor",
+                        "value": 0.8,
+                        "targets_metric": "extraction.recall",
+                        "why": "tighten matching",
+                    }
+                ]
+            }
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=InMemoryGraphStore())
+    baseline = {
+        "extraction.precision": 0.9,
+        "extraction.recall": 0.85,
+        "grounding.false_accept": 0.01,
+        "clustering.f1": 0.8,
+        "tension.accuracy": 0.75,
+        "schema.validity": 0.99,
+        "feedback.wrong_rate": 0.5,
+        "feedback.total_rated": 10,  # at MIN_FEEDBACK_SAMPLES, gate is live
+    }
+    shadow = dict(baseline)
+    shadow["extraction.recall"] = 0.9  # improved
+    shadow["feedback.wrong_rate"] = 0.8  # regresses — should block acceptance
+    with patch("mslearn.evals.evolve.compute_component_metrics", side_effect=[baseline, shadow]):
+        summary = evolve_once(ctx)
+    assert summary["accepted"] == []
+    assert db.get_tunable("synth.similarity_floor") == 0.75  # unchanged

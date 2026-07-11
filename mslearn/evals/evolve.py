@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import replace
 
-from mslearn.evals.gates import GATES
+from mslearn.evals.gates import GATES, gate_enforced
 from mslearn.evals.judged import provenance_violation_count
 from mslearn.evals.metrics import compute_component_metrics
 from mslearn.evals.runner import run_eval
@@ -161,6 +161,7 @@ def evolve_once(ctx) -> dict:
     proposals = parsed.get("proposals", [])[:3]
 
     accepted = []
+    pending = []
     rejected = []
     for proposal in proposals:
         if not isinstance(proposal, dict):
@@ -213,7 +214,7 @@ def evolve_once(ctx) -> dict:
         gates_ok = all(
             _not_regressed(metric, shadow_metrics.get(metric, 0.0), baseline[metric])
             for metric in GATES
-            if metric in baseline
+            if metric in baseline and gate_enforced(metric, baseline)
         )
         run_id = ctx.db.create_evolution_run(
             proposal_json=json.dumps(proposal),
@@ -224,16 +225,22 @@ def evolve_once(ctx) -> dict:
         )
         if target_improved and gates_ok:
             if proposal.get("kind") == "tunable":
+                # Tunables are numeric knobs with bounded ranges — safe to
+                # auto-apply once they pass shadow-eval.
                 ctx.db.set_tunable(
                     proposal["key"],
                     float(proposal["value"]),
                     reason=f"evolve run {run_id}: {proposal.get('why', '')}",
                 )
+                ctx.db.set_evolution_run_accepted(run_id, True)
+                accepted.append({"proposal": proposal, "run_id": run_id})
             else:
-                prompt_name = str(proposal["key"]).removeprefix("prompt:")
-                ctx.db.set_setting(f"prompt:{prompt_name}", str(proposal["new_prompt"]))
-            ctx.db.set_evolution_run_accepted(run_id, True)
-            accepted.append({"proposal": proposal, "run_id": run_id})
+                # Prompt rewrites change model behavior in ways shadow-eval
+                # can't fully capture — queue for explicit user approval
+                # instead of auto-applying (see Task 8's approve/reject
+                # endpoints). Never call set_setting here.
+                ctx.db.set_evolution_run_status(run_id, "pending")
+                pending.append({"proposal": proposal, "run_id": run_id})
         else:
             rejected.append(
                 {
@@ -242,7 +249,7 @@ def evolve_once(ctx) -> dict:
                     "reason": "shadow regression or no improvement",
                 }
             )
-    return {"accepted": accepted, "rejected": rejected, "baseline": baseline}
+    return {"accepted": accepted, "pending": pending, "rejected": rejected, "baseline": baseline}
 
 
 def rollback_tunable(db, key: str) -> float:
