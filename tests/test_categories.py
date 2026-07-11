@@ -3,9 +3,17 @@ from pathlib import Path
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
 from mslearn.pipeline.synthesis import assign_categories
+from mslearn.prompts import PROMPTS
 from mslearn.settings import Settings
 from mslearn.worker.context import PipelineContext
 from tests.fakes import InMemoryGraphStore, ScriptedRouter
+
+
+def test_category_prompt_bans_catch_all_and_covers_every_concept():
+    prompt = PROMPTS["concept_categories"].lower()
+    assert "other" in prompt  # it explicitly forbids the word
+    assert "never create a catch-all" in prompt
+    assert "every provided concept id must appear" in prompt
 
 
 def _ctx(tmp_path, outputs):

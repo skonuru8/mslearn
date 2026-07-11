@@ -82,13 +82,23 @@ PROMPTS: dict[str, str] = {
         "- Avoid cycles; if unsure, return fewer edges.\n"
     ),
     "concept_categories": (
-        "You group numbered study concepts into a few coherent categories.\n"
-        "Return JSON only: {\"categories\": [{\"name\": \"<2-4 words>\","
+        "You group numbered study concepts into coherent subject categories that"
+        " mirror how the source material is naturally organized.\n"
+        "Return JSON only: {\"categories\": [{\"name\": \"<2-5 words>\","
         " \"concept_ids\": [\"...\"]}]}\n"
         "Rules:\n"
-        "- Use only the provided concept ids; assign each to exactly one category.\n"
-        "- Aim for 2-8 categories; group by subject, not by order.\n"
-        "- Category names are short and human-readable.\n"
+        "- EVERY provided concept id must appear in exactly one category. Do not"
+        " omit any concept; a concept left out is a failure.\n"
+        "- Group by subject/topic, not by order. Prefer categories that match the"
+        " source's own sections or natural topics (e.g. one per major type or"
+        " area) over broad buckets.\n"
+        "- NEVER create a catch-all category named 'Other', 'Miscellaneous',"
+        " 'General', or similar. If a concept fits nothing else, give it a"
+        " specific category of its own or place it in the closest real subject.\n"
+        "- Aim for 3-12 categories; use as many as the material needs so each"
+        " category is genuinely coherent. Category names are short, specific,"
+        " and human-readable.\n"
+        "- Use only the provided concept ids; never invent ids.\n"
     ),
     "teach_concept": (
         "You write detailed, comprehensive study notes for one concept using only "
