@@ -53,6 +53,10 @@ def load_source(
         return load_text(ref, role)
     if stype == "markdown":
         return load_markdown(ref, role)
+    if stype == "docx":
+        from mslearn.adapters.docx_src import load_docx  # keeps python-docx lazy
+
+        return load_docx(ref, role)
     if stype == "youtube":
         from mslearn.adapters.youtube import load_youtube  # keeps yt deps lazy
 
