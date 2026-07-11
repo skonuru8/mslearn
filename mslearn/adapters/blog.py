@@ -12,6 +12,19 @@ class BlogExtractionError(Exception):
     """trafilatura found no extractable article content."""
 
 
+# Many sites (Cloudflare-fronted ones like baeldung.com) reject the default
+# httpx User-Agent with 403 Forbidden. Present a mainstream browser UA plus
+# the Accept headers a real browser sends so article pages actually load.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
 def _title_of(html: str, fallback: str) -> str:
     match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else fallback
@@ -40,7 +53,7 @@ def load_blog_html(html: str, url: str, role: str = "supplement") -> SourceDocum
 
 def load_blog(ref: str, role: str = "supplement") -> SourceDocument:
     if ref.startswith(("http://", "https://")):
-        resp = httpx.get(ref, follow_redirects=True, timeout=60.0)
+        resp = httpx.get(ref, follow_redirects=True, timeout=60.0, headers=_BROWSER_HEADERS)
         resp.raise_for_status()
         return load_blog_html(resp.text, url=ref, role=role)
     path = Path(ref)

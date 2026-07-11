@@ -42,6 +42,17 @@ def test_load_blog_fetches_url():
     assert doc.title == "Why Global State Hurts"
 
 
+@respx.mock
+def test_load_blog_sends_browser_user_agent():
+    # Sites behind Cloudflare (e.g. baeldung.com) 403 the default httpx UA;
+    # the request must carry a mainstream browser User-Agent.
+    route = respx.get("https://example.com/post").respond(text=FIXTURE.read_text())
+    load_blog("https://example.com/post")
+    ua = route.calls.last.request.headers.get("user-agent", "")
+    assert "Mozilla" in ua
+    assert "python-httpx" not in ua
+
+
 def test_load_blog_local_path():
     doc = load_blog(str(FIXTURE))
     assert doc.title == "Why Global State Hurts"
