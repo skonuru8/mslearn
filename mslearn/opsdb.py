@@ -213,6 +213,7 @@ class OpsDB:
         self._ensure_column("ingest_sources", "project_id", "TEXT NOT NULL DEFAULT 'default'")
         self._ensure_column("chunk_jobs", "project_id", "TEXT NOT NULL DEFAULT 'default'")
         self._ensure_column("quiz_results", "project_id", "TEXT NOT NULL DEFAULT 'default'")
+        self._ensure_column("evolution_runs", "status", "TEXT NOT NULL DEFAULT 'applied'")
         self._bootstrap_projects()
         self._migrate_legacy_project_settings()
 
@@ -800,12 +801,14 @@ class OpsDB:
         shadow_after_json: str,
         accepted: bool,
         reason: str,
+        status: str = "applied",
     ) -> int:
         with self._lock, self.conn:
             cur = self.conn.execute(
                 "INSERT INTO evolution_runs"
-                " (ts, proposal_json, shadow_before_json, shadow_after_json, accepted, reason)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                " (ts, proposal_json, shadow_before_json, shadow_after_json, accepted,"
+                " reason, status)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     time.time(),
                     proposal_json,
@@ -813,6 +816,7 @@ class OpsDB:
                     shadow_after_json,
                     1 if accepted else 0,
                     reason,
+                    status,
                 ),
             )
             return int(cur.lastrowid)
@@ -829,6 +833,20 @@ class OpsDB:
                 "UPDATE evolution_runs SET accepted = ? WHERE id = ?",
                 (1 if accepted else 0, run_id),
             )
+
+    def set_evolution_run_status(self, run_id: int, status: str) -> None:
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE evolution_runs SET status = ? WHERE id = ?",
+                (status, run_id),
+            )
+
+    def pending_evolution_runs(self) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT * FROM evolution_runs WHERE status = 'pending' ORDER BY id DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def evolution_history(self, limit: int = 20) -> list[dict]:
         with self._lock:
