@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ConceptView } from "./ConceptView";
+import { installFetchMock } from "../test/fetchMock";
 
 function conceptDetailBody() {
   return {
@@ -36,6 +37,25 @@ function teachBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function baseHandlers(overrides: Record<string, (path: string, init?: RequestInit) => unknown> = {}) {
+  return {
+    "/api/study/concepts/k1/teach": () => teachBody(),
+    "/api/study/concepts/k1/feedback": () => ({}),
+    "/api/study/concepts/k1": () => conceptDetailBody(),
+    ...overrides,
+  };
+}
+
+function renderConcept(path = "/concepts/k1") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/concepts/:id" element={<ConceptView />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe("ConceptView", () => {
   it("flags claim and refetches", async () => {
     vi.stubGlobal(
@@ -43,25 +63,19 @@ describe("ConceptView", () => {
       vi.fn(() => "bad quote"),
     );
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => conceptDetailBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => teachBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ claim_id: "c1", status: "flagged" }) })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ ...conceptDetailBody(), claims: [], citations: [] }),
-      })
-      .mockResolvedValueOnce({ ok: true, json: async () => teachBody() });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <MemoryRouter initialEntries={["/concepts/k1"]}>
-        <Routes>
-          <Route path="/concepts/:id" element={<ConceptView />} />
-        </Routes>
-      </MemoryRouter>,
+    let flagged = false;
+    const fetchMock = installFetchMock(
+      baseHandlers({
+        "/api/study/concepts/k1": () =>
+          flagged ? { ...conceptDetailBody(), claims: [], citations: [] } : conceptDetailBody(),
+        "/api/study/claims/c1/flag": () => {
+          flagged = true;
+          return { claim_id: "c1", concept_id: "k1", status: "flagged" };
+        },
+      }),
     );
+
+    renderConcept();
 
     await screen.findByText("Cache");
     await userEvent.click(screen.getByRole("button", { name: "Flag" }));
@@ -83,32 +97,16 @@ describe("ConceptView", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(
-      <MemoryRouter initialEntries={["/concepts/x"]}>
-        <Routes>
-          <Route path="/concepts/:id" element={<ConceptView />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderConcept("/concepts/x");
 
     expect(await screen.findByText(/not part of this project/i)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders the interactive study guide instead of markdown", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => conceptDetailBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => teachBody() });
-    vi.stubGlobal("fetch", fetchMock);
+    installFetchMock(baseHandlers());
 
-    render(
-      <MemoryRouter initialEntries={["/concepts/k1"]}>
-        <Routes>
-          <Route path="/concepts/:id" element={<ConceptView />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderConcept();
 
     expect(await screen.findByRole("heading", { name: "Basics" })).toBeInTheDocument();
     expect(screen.getByText(/Caches speed up reads\./)).toBeInTheDocument();
@@ -117,47 +115,32 @@ describe("ConceptView", () => {
   it("does not double-render the concept summary in the header", async () => {
     // The concept's one-liner summary must appear only through the guide's
     // lede (tl_dr), not again as a standalone <p> under the <h1>.
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => conceptDetailBody() })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => teachBody({
-          guide: {
-            ...teachBody().guide,
-            tl_dr: { text: "Stale data", claims: ["c1"] },
-          },
-        }),
-      });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <MemoryRouter initialEntries={["/concepts/k1"]}>
-        <Routes>
-          <Route path="/concepts/:id" element={<ConceptView />} />
-        </Routes>
-      </MemoryRouter>,
+    installFetchMock(
+      baseHandlers({
+        "/api/study/concepts/k1/teach": () =>
+          teachBody({
+            guide: {
+              ...teachBody().guide,
+              tl_dr: { text: "Stale data", claims: ["c1"] },
+            },
+          }),
+      }),
     );
+
+    renderConcept();
 
     await screen.findByRole("heading", { name: "Cache" });
     expect(screen.getAllByText(/Stale data/)).toHaveLength(1);
   });
 
   it("toggles section reviewed and posts to /progress", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => conceptDetailBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => teachBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ progress: { s1: true } }) });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <MemoryRouter initialEntries={["/concepts/k1"]}>
-        <Routes>
-          <Route path="/concepts/:id" element={<ConceptView />} />
-        </Routes>
-      </MemoryRouter>,
+    const fetchMock = installFetchMock(
+      baseHandlers({
+        "/api/study/concepts/k1/progress": () => ({ progress: { s1: true } }),
+      }),
     );
+
+    renderConcept();
 
     await screen.findByRole("heading", { name: "Basics" });
     await userEvent.click(screen.getByRole("checkbox", { name: /reviewed/i }));
@@ -174,25 +157,15 @@ describe("ConceptView", () => {
   });
 
   it("makes on-demand flashcards with the chosen count and shows a flip card", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => conceptDetailBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => teachBody() })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
+    const fetchMock = installFetchMock(
+      baseHandlers({
+        "/api/study/concepts/k1/flashcards": () => ({
           cards: [{ front: "What speeds up reads?", back: "A cache.", claims: ["c1"] }],
         }),
-      });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <MemoryRouter initialEntries={["/concepts/k1"]}>
-        <Routes>
-          <Route path="/concepts/:id" element={<ConceptView />} />
-        </Routes>
-      </MemoryRouter>,
+      }),
     );
+
+    renderConcept();
 
     await screen.findByRole("heading", { name: "Basics" });
     const countInput = screen.getByLabelText(/count/i);
@@ -216,20 +189,13 @@ describe("ConceptView", () => {
   });
 
   it("omits the self-check panel gracefully when the backend returns none", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => conceptDetailBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => teachBody() })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ checks: [] }) });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <MemoryRouter initialEntries={["/concepts/k1"]}>
-        <Routes>
-          <Route path="/concepts/:id" element={<ConceptView />} />
-        </Routes>
-      </MemoryRouter>,
+    const fetchMock = installFetchMock(
+      baseHandlers({
+        "/api/study/concepts/k1/selfcheck": () => ({ checks: [] }),
+      }),
     );
+
+    renderConcept();
 
     await screen.findByRole("heading", { name: "Basics" });
     await userEvent.click(screen.getByRole("button", { name: /self-check/i }));

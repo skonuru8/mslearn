@@ -306,6 +306,13 @@ export interface FlagClaimResponse {
   status: string;
 }
 
+export interface NoteFeedbackRow {
+  helpful: boolean | null;
+  tags: string[];
+  comment: string;
+  guide_hash: string | null;
+}
+
 export interface EvalRun {
   id: number;
   ts: number;

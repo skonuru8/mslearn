@@ -10,6 +10,7 @@ import type {
   TeachResponse,
 } from "../api/types";
 import { buildClaimNumbers, ClaimText, InteractiveGuide, SourcesFooter } from "../components/InteractiveGuide";
+import { NoteFeedback } from "../components/NoteFeedback";
 import { ErrorBanner, Loading } from "../components/Status";
 
 export function ConceptView() {
@@ -207,6 +208,7 @@ export function ConceptView() {
               onToggleSection={(sectionId, reviewed) => void toggleSection(sectionId, reviewed)}
             />
           ) : null}
+          <NoteFeedback conceptId={id} />
         </>
       )}
 
