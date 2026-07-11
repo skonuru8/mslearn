@@ -8,7 +8,7 @@ from typing import Literal
 from mslearn.graph.records import validate_classification
 
 ReviewStatus = Literal["pending", "approved", "corrected"]
-GOLDEN_KINDS = ("extraction", "grounding", "clustering", "tension")
+GOLDEN_KINDS = ("extraction", "grounding", "clustering", "tension", "guide")
 GOLDEN_DIR = Path(__file__).resolve().parents[2] / "evals" / "golden"
 ACTIVE_REVIEWS = frozenset({"approved", "corrected"})
 
@@ -59,6 +59,32 @@ class TensionGolden:
         if self.domain_profile not in {"technical", "interpretive"}:
             raise GoldenFormatError(f"invalid domain_profile {self.domain_profile!r}")
         validate_classification(self.classification)
+
+
+GUIDE_AXES = ("depth", "non_redundancy", "category_fit", "grounding")
+
+
+@dataclass
+class GuideGolden:
+    """A regression fixture ratcheting a flagged note into the guide judge:
+    the concept's claims frozen at promotion time (so the fixture stays
+    stable even as the live graph changes), the axis the user's feedback
+    tag maps to, and the feedback tag itself for context."""
+
+    concept_id: str
+    concept_name: str
+    concept_summary: str
+    claims: list[dict]
+    failing_axis: str
+    tag: str
+    review: ReviewStatus = "approved"
+
+    def __post_init__(self) -> None:
+        if self.failing_axis not in GUIDE_AXES:
+            raise GoldenFormatError(f"invalid failing_axis {self.failing_axis!r}")
+        for claim in self.claims:
+            if not isinstance(claim, dict) or "claim_id" not in claim or "text" not in claim:
+                raise GoldenFormatError("claims entries need claim_id and text")
 
 
 def _golden_path(kind: str) -> Path:
@@ -114,6 +140,7 @@ def _class_for_kind(kind: str):
         "grounding": GroundingGolden,
         "clustering": ClusteringGolden,
         "tension": TensionGolden,
+        "guide": GuideGolden,
     }[kind]
 
 

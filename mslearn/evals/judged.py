@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import re
 
-from mslearn.pipeline.guide_gen import generate_guide
+from mslearn.evals.golden import load_golden
+from mslearn.pipeline.guide import GUIDE_SCHEMA, drop_ungrounded, parse_guide
+from mslearn.pipeline.guide_gen import _format_claims, generate_guide
 from mslearn.pipeline.teaching import generate_teaching
-from mslearn.prompts import get_prompt
+from mslearn.prompts import domain_guidance, get_domain_profile, get_prompt
 from mslearn.providers.base import ModelMessage, ModelRequest, ProviderBadOutputError
 
 _CLAIM_RE = re.compile(r"\[claim:([^\]\s]+)\]")
@@ -126,17 +128,83 @@ _GUIDE_RUBRIC_SCHEMA = {
 }
 
 
+def _rubric_score_guide(
+    ctx, prompt: str, concept_name: str, concept_summary: str, guide: dict, concept_claim_ids: set[str]
+) -> dict[str, float]:
+    """Scores one guide dict against the rubric_guide judge, folding in the
+    structural grounding penalty from guide_grounding_violations."""
+    violations = guide_grounding_violations(guide, concept_claim_ids)
+    response = ctx.router.complete(
+        "evals",
+        ModelRequest(
+            messages=[
+                ModelMessage(
+                    role="user",
+                    content=prompt.format(
+                        concept_name=concept_name,
+                        concept_summary=concept_summary,
+                        guide=json.dumps(guide),
+                    ),
+                )
+            ],
+            json_schema=_GUIDE_RUBRIC_SCHEMA,
+        ),
+    )
+    parsed = response.parsed if isinstance(response.parsed, dict) else {}
+    grounding = float(parsed.get("grounding_1_5", 0)) / 5.0
+    if violations:
+        grounding = max(0.0, grounding - 0.2 * len(violations))
+    return {
+        "depth": float(parsed.get("depth_1_5", 0)) / 5.0,
+        "non_redundancy": float(parsed.get("redundancy_1_5", 0)) / 5.0,
+        "category_fit": float(parsed.get("category_fit_1_5", 0)) / 5.0,
+        "grounding": grounding,
+    }
+
+
+def _generate_guide_for_fixture(ctx, fixture) -> dict:
+    """Generates a fresh guide from a frozen `guide` golden fixture's claims,
+    bypassing generate_guide's live-graph lookup and cache (the fixture's
+    concept_id need not exist in the current graph)."""
+    profile = get_domain_profile(ctx.db)
+    prompt = get_prompt(ctx.db, "guide").format(
+        domain_guidance=domain_guidance(profile),
+        concept_name=fixture.concept_name,
+        concept_summary=fixture.concept_summary,
+        claims=_format_claims(fixture.claims),
+        memory_hints="(none)",
+    )
+    resp = ctx.router.complete(
+        "interactive",
+        ModelRequest(
+            messages=[ModelMessage(role="user", content=prompt)],
+            json_schema=GUIDE_SCHEMA,
+            max_tokens=int(ctx.db.get_tunable("guide.max_tokens")),
+        ),
+    )
+    guide = drop_ungrounded(
+        parse_guide(
+            {**(resp.parsed or {}), "concept_id": fixture.concept_id, "title": fixture.concept_name}
+        )
+    )
+    return guide.model_dump()
+
+
 def judge_guide(ctx, n: int = 5) -> dict[str, float]:
     """Judges the guide JSON path the user actually sees (generate_guide), not
-    the legacy teach_concept markdown path judge_teaching scores.
+    the legacy teach_concept markdown path judge_teaching scores. Also scores
+    every active `guide` golden fixture (concepts ratcheted in from negative
+    feedback via promote_feedback_to_golden) so a fixed regression stays
+    caught instead of drifting back once the live sample rotates past it.
 
     Degrades to a neutral all-zero result on ProviderBadOutputError from
     either guide generation or the rubric judge call — never crashes a run.
     """
     concepts = ctx.graph.curriculum() or ctx.graph.all_concepts()
-    sample = concepts[:n]
+    sample = concepts[: n]
+    fixtures = load_golden("guide", active_only=True)
     neutral = {"depth": 0.0, "non_redundancy": 0.0, "category_fit": 0.0, "grounding": 0.0}
-    if not sample:
+    if not sample and not fixtures:
         return neutral
 
     depth_scores: list[float] = []
@@ -152,33 +220,29 @@ def judge_guide(ctx, n: int = 5) -> dict[str, float]:
             concept_claims = {
                 c["claim_id"] for c in ctx.graph.claims_in_concept(concept_id)
             }
-            violations = guide_grounding_violations(guide, concept_claims)
-            response = ctx.router.complete(
-                "evals",
-                ModelRequest(
-                    messages=[
-                        ModelMessage(
-                            role="user",
-                            content=prompt.format(
-                                concept_name=concept.get("name", ""),
-                                concept_summary=concept.get("summary", ""),
-                                guide=json.dumps(guide),
-                            ),
-                        )
-                    ],
-                    json_schema=_GUIDE_RUBRIC_SCHEMA,
-                ),
+            scores = _rubric_score_guide(
+                ctx, prompt, concept.get("name", ""), concept.get("summary", ""), guide, concept_claims
             )
         except ProviderBadOutputError:
             continue
-        parsed = response.parsed if isinstance(response.parsed, dict) else {}
-        depth_scores.append(float(parsed.get("depth_1_5", 0)) / 5.0)
-        redundancy_scores.append(float(parsed.get("redundancy_1_5", 0)) / 5.0)
-        category_scores.append(float(parsed.get("category_fit_1_5", 0)) / 5.0)
-        grounding = float(parsed.get("grounding_1_5", 0)) / 5.0
-        if violations:
-            grounding = max(0.0, grounding - 0.2 * len(violations))
-        grounding_scores.append(grounding)
+        depth_scores.append(scores["depth"])
+        redundancy_scores.append(scores["non_redundancy"])
+        category_scores.append(scores["category_fit"])
+        grounding_scores.append(scores["grounding"])
+
+    for fixture in fixtures:
+        try:
+            guide = _generate_guide_for_fixture(ctx, fixture)
+            concept_claims = {c["claim_id"] for c in fixture.claims}
+            scores = _rubric_score_guide(
+                ctx, prompt, fixture.concept_name, fixture.concept_summary, guide, concept_claims
+            )
+        except ProviderBadOutputError:
+            continue
+        depth_scores.append(scores["depth"])
+        redundancy_scores.append(scores["non_redundancy"])
+        category_scores.append(scores["category_fit"])
+        grounding_scores.append(scores["grounding"])
 
     if not depth_scores:
         return neutral

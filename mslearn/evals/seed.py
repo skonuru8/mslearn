@@ -6,6 +6,7 @@ from mslearn.evals.golden import (
     ClusteringGolden,
     ExtractionGolden,
     GroundingGolden,
+    GuideGolden,
     TensionGolden,
     append_golden,
     load_golden,
@@ -158,6 +159,52 @@ def seed_tension(ctx, n_pairs: int = 50) -> int:
         )
         added += 1
     return added
+
+
+# Maps a feedback tag to the guide-judge axis it most directly evidences,
+# so a promoted fixture ratchets exactly the failure mode the user flagged.
+_TAG_TO_AXIS = {
+    "too_shallow": "depth",
+    "repetitive": "non_redundancy",
+    "wrong": "grounding",
+    "off_topic": "category_fit",
+}
+
+
+def promote_feedback_to_golden(ctx, concept_id: str, project_id: str = "default") -> GuideGolden:
+    """Promotes a negatively-rated concept into a `guide` golden fixture:
+    freezes its claims and worst feedback tag so the fixture stays stable
+    even as the live graph changes, and the regression the user flagged
+    stays caught once it's fixed (the ratchet)."""
+    concept = ctx.graph.get_concept(concept_id, project_id=project_id)
+    if concept is None:
+        raise KeyError(f"unknown concept {concept_id!r}")
+    feedback = ctx.db.feedback_for_concept(concept_id, project_id)
+    if feedback is None:
+        raise KeyError(f"no feedback recorded for concept {concept_id!r}")
+    tags = feedback.get("tags") or []
+    tag = tags[0] if tags else "wrong"
+    axis = _TAG_TO_AXIS.get(tag, "grounding")
+    claims = [
+        {
+            "claim_id": c["claim_id"],
+            "text": c["text"],
+            "stance": c.get("stance", "neutral"),
+            "kind": c.get("kind", "claim"),
+        }
+        for c in ctx.graph.claims_in_concept(concept_id, project_id=project_id)
+    ]
+    record = GuideGolden(
+        concept_id=concept_id,
+        concept_name=concept.get("name", ""),
+        concept_summary=concept.get("summary", ""),
+        claims=claims,
+        failing_axis=axis,
+        tag=tag,
+        review="approved",
+    )
+    append_golden("guide", record)
+    return record
 
 
 def pending_golden(kind: str) -> list[dict]:

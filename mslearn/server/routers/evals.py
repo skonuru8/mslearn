@@ -15,8 +15,15 @@ from mslearn.evals.golden import (
     replace_golden_record,
 )
 from mslearn.evals.runner import run_eval
-from mslearn.evals.seed import pending_golden, seed_clustering, seed_extraction, seed_grounding, seed_tension
-from mslearn.server.deps import get_ctx
+from mslearn.evals.seed import (
+    pending_golden,
+    promote_feedback_to_golden,
+    seed_clustering,
+    seed_extraction,
+    seed_grounding,
+    seed_tension,
+)
+from mslearn.server.deps import get_ctx, get_project_id
 
 router = APIRouter(prefix="/api/evals", tags=["evals"])
 
@@ -24,6 +31,10 @@ router = APIRouter(prefix="/api/evals", tags=["evals"])
 class GoldenReviewRequest(BaseModel):
     action: Literal["approve", "correct", "reject"]
     corrected: dict[str, Any] | None = None
+
+
+class GuideFromFeedbackRequest(BaseModel):
+    concept_id: str
 
 
 @router.get("/golden/{kind}")
@@ -36,6 +47,22 @@ def golden_queue(kind: str, status: str = "pending"):
         for index, row in enumerate(rows)
         if row.review == status
     ]
+
+
+# Registered before /golden/{kind}/{index}: that route's {index} is a plain
+# path segment at the routing layer (int-coercion happens only after a match),
+# so a literal route below it in registration order would never be reached —
+# Starlette tries routes in registration order and /golden/{kind}/{index}
+# would "match" guide/from-feedback first and then 422 on the int coercion.
+@router.post("/golden/guide/from-feedback")
+def golden_guide_from_feedback(
+    body: GuideFromFeedbackRequest, ctx=Depends(get_ctx), project_id: str = Depends(get_project_id)
+):
+    try:
+        record = promote_feedback_to_golden(ctx, body.concept_id, project_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return asdict(record)
 
 
 @router.post("/golden/{kind}/{index}")

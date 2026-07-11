@@ -1,3 +1,4 @@
+from mslearn.evals.golden import GuideGolden, append_golden
 from mslearn.evals.judged import guide_grounding_violations, judge_guide
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
@@ -65,3 +66,39 @@ def test_judge_guide_degrades_on_bad_output_instead_of_crashing(tmp_path):
     result = judge_guide(ctx, n=1)
 
     assert result == {"depth": 0.0, "non_redundancy": 0.0, "category_fit": 0.0, "grounding": 0.0}
+
+
+def test_judge_guide_also_scores_active_golden_fixtures(tmp_path, monkeypatch):
+    # No live concepts in the graph at all — the only signal judge_guide has
+    # is the ratcheted golden fixture, so this proves the fixture path is
+    # wired in on its own, not just riding along with live sampling.
+    monkeypatch.setattr("mslearn.evals.golden.GOLDEN_DIR", tmp_path)
+    append_golden(
+        "guide",
+        GuideGolden(
+            concept_id="k1",
+            concept_name="Cache invalidation",
+            concept_summary="Summary",
+            claims=[{"claim_id": "c1", "text": "text", "stance": "neutral", "kind": "claim"}],
+            failing_axis="depth",
+            tag="too_shallow",
+            review="approved",
+        ),
+    )
+    guide_json = {
+        "concept_id": "k1",
+        "title": "Cache invalidation",
+        "tl_dr": {"text": "t", "claims": ["c1"]},
+        "skeleton": ["S"],
+        "sections": [
+            {"id": "s1", "title": "S", "items": [{"kind": "claim", "text": "x", "claims": ["c1"]}]}
+        ],
+    }
+    rubric_json = {"depth_1_5": 5, "redundancy_1_5": 5, "category_fit_1_5": 5, "grounding_1_5": 5}
+    router = ScriptedRouter([guide_json, rubric_json])
+    db = OpsDB(tmp_path / "o.db")
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=InMemoryGraphStore())
+
+    result = judge_guide(ctx, n=5)
+
+    assert result == {"depth": 1.0, "non_redundancy": 1.0, "category_fit": 1.0, "grounding": 1.0}
