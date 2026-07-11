@@ -24,6 +24,9 @@ def test_runner_persists_metrics(tmp_path):
         "tension.accuracy": 0.80,
         "schema.validity": 1.0,
         "provenance.violations": 0.0,
+        "guide.grounding": 1.0,
+        "feedback.wrong_rate": 0.0,
+        "feedback.helpful_rate": 1.0,
     }
 
     result = run_eval(ctx, offline=True, metric_fn=lambda _ctx: fake_metrics)

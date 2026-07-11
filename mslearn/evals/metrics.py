@@ -5,6 +5,8 @@ import re
 from rapidfuzz import fuzz
 
 from mslearn.evals.golden import load_golden
+from mslearn.evals.judged import judge_guide
+from mslearn.opsdb import DEFAULT_PROJECT_ID
 from mslearn.pipeline.contracts import ClaimDraft
 from mslearn.pipeline.extraction_graph import build_extraction_graph, run_extraction
 from mslearn.pipeline.synthesis import classify_conflict_pair, concept_match_claim_ids
@@ -207,12 +209,35 @@ def _chunk_coverage(ctx) -> float:
     return 1.0
 
 
+def feedback_rates(ctx) -> dict[str, float]:
+    agg = ctx.db.feedback_aggregate(DEFAULT_PROJECT_ID)
+    total = agg.get("total_rated", 0)
+
+    def _rate(key: str) -> float:
+        return (agg.get(key, 0) / total) if total else 0.0
+
+    return {
+        "helpful_rate": _rate("helpful"),
+        "shallow_rate": _rate("too_shallow"),
+        "repetitive_rate": _rate("repetitive"),
+        "wrong_rate": _rate("wrong"),
+        "offtopic_rate": _rate("off_topic"),
+        "total_rated": total,
+    }
+
+
+def guide_quality(ctx) -> dict[str, float]:
+    return judge_guide(ctx)
+
+
 def compute_component_metrics(ctx) -> dict[str, float]:
     extraction = extraction_pr(ctx)
     grounding = grounding_rates(ctx)
     clustering = clustering_f1(ctx)
     tension = tension_accuracy(ctx)
     schema = schema_validity(ctx)
+    feedback = feedback_rates(ctx)
+    guide = guide_quality(ctx)
     return {
         "extraction.precision": extraction["precision"],
         "extraction.recall": extraction["recall"],
@@ -223,4 +248,14 @@ def compute_component_metrics(ctx) -> dict[str, float]:
         "schema.validity": schema["validity"],
         "schema.quote_match_rate": schema["quote_match_rate"],
         "schema.chunk_coverage": schema["chunk_coverage"],
+        "feedback.helpful_rate": feedback["helpful_rate"],
+        "feedback.shallow_rate": feedback["shallow_rate"],
+        "feedback.repetitive_rate": feedback["repetitive_rate"],
+        "feedback.wrong_rate": feedback["wrong_rate"],
+        "feedback.offtopic_rate": feedback["offtopic_rate"],
+        "feedback.total_rated": feedback["total_rated"],
+        "guide.depth": guide["depth"],
+        "guide.non_redundancy": guide["non_redundancy"],
+        "guide.category_fit": guide["category_fit"],
+        "guide.grounding": guide["grounding"],
     }

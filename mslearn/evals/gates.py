@@ -8,7 +8,22 @@ GATES: dict[str, tuple[str, float]] = {
     "tension.accuracy": (">=", 0.75),
     "schema.validity": (">=", 0.99),
     "provenance.violations": ("==", 0.0),
+    "guide.grounding": (">=", 0.98),
+    "feedback.wrong_rate": ("<=", 0.05),
+    "feedback.helpful_rate": (">=", 0.70),
 }
+
+# Feedback gates are noisy on a handful of ratings — they bind only once
+# there's enough signal to trust them (mirrors the provenance gate's
+# "not evaluated" pattern for proposals that can't be cheaply re-measured).
+MIN_FEEDBACK_SAMPLES = 10
+SAMPLE_GATED = {"feedback.helpful_rate", "feedback.wrong_rate"}
+
+
+def gate_enforced(metric: str, metrics: dict) -> bool:
+    if metric in SAMPLE_GATED:
+        return metrics.get("feedback.total_rated", 0) >= MIN_FEEDBACK_SAMPLES
+    return True
 
 
 def evaluate_gate(metric: str, value: float) -> tuple[float | None, bool]:
