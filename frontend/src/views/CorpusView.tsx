@@ -149,12 +149,37 @@ export function CorpusView() {
     if (!synthesisStatus?.running_since) {
       return;
     }
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void refreshSynthesisStatus();
+    const poll = () => {
+      void refreshSynthesisStatus();
+    };
+    let timer: number | undefined;
+    const start = () => {
+      if (timer === undefined) {
+        timer = window.setInterval(poll, 15_000);
       }
-    }, 10_000);
-    return () => window.clearInterval(timer);
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        poll();
+        start();
+      } else {
+        stop();
+      }
+    };
+    if (document.visibilityState === "visible") {
+      start();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [synthesisStatus?.running_since, refreshSynthesisStatus]);
 
   useEffect(() => {
@@ -169,7 +194,7 @@ export function CorpusView() {
     let timer: number | undefined;
     const start = () => {
       if (timer === undefined) {
-        timer = window.setInterval(poll, 3000);
+        timer = window.setInterval(poll, 5000);
       }
     };
     const stop = () => {

@@ -80,14 +80,39 @@ export function CurriculumView() {
     }
     // Course is being assembled right now — refresh so topics appear on
     // their own instead of requiring a manual reload.
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void refresh().catch(() => {
-          /* keep polling */
-        });
+    const poll = () => {
+      void refresh().catch(() => {
+        /* keep polling */
+      });
+    };
+    let timer: number | undefined;
+    const start = () => {
+      if (timer === undefined) {
+        timer = window.setInterval(poll, 15_000);
       }
-    }, 10_000);
-    return () => window.clearInterval(timer);
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        poll();
+        start();
+      } else {
+        stop();
+      }
+    };
+    if (document.visibilityState === "visible") {
+      start();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [building, refresh]);
 
   if (loading) {

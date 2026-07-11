@@ -66,4 +66,52 @@ describe("CurriculumView", () => {
     expect(screen.getByText(/Arrays/)).toBeInTheDocument();
     expect(screen.queryByText("Other")).not.toBeInTheDocument();
   });
+
+  it("polls the curriculum every 15s while building, and pauses when the tab is hidden", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let visibility: DocumentVisibilityState = "visible";
+    const visibilitySpy = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => visibility);
+
+    let curriculumCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = url.startsWith("http") ? new URL(url).pathname : url;
+      if (path === "/api/projects") {
+        return {
+          ok: true,
+          json: async () => [{ project_id: "default", name: "Default", created_ts: 0 }],
+        };
+      }
+      if (path === "/api/study/curriculum") {
+        curriculumCalls += 1;
+        return { ok: true, json: async () => [] };
+      }
+      if (path === "/api/corpus/synthesis/status") {
+        return { ok: true, json: async () => ({ running_since: 1, last_run: null, progress: null }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      renderCurriculum();
+      await vi.waitFor(() => expect(screen.queryByText(/Loading/i)).toBeNull());
+      expect(curriculumCalls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(curriculumCalls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(curriculumCalls).toBe(2);
+
+      visibility = "hidden";
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(curriculumCalls).toBe(2);
+    } finally {
+      visibilitySpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
