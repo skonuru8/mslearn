@@ -982,6 +982,81 @@ td {
   margin-bottom: 0.3rem;
 }
 
+/* ---------- Model's interpretation (analysis layer, not grounded in the source) ---------- */
+
+.guide-interpretation {
+  margin-top: 0.2rem;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  border: 2px dashed #94a3b8;
+  background: #f8fafc;
+}
+
+.guide-interpretation-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.guide-interpretation-item {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+  border-radius: 8px;
+  border-left: 4px solid var(--angle-accent, #64748b);
+  background: var(--angle-bg, #f1f5f9);
+}
+
+.guide-interpretation-item:last-child {
+  margin-bottom: 0;
+}
+
+.guide-interpretation-angle {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--angle-accent, #475569);
+  min-width: 5.2rem;
+}
+
+.guide-interpretation-text {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #334155;
+}
+
+.guide-interpretation-item.angle-assumption {
+  --angle-accent: #7c3aed;
+  --angle-bg: #f5f3ff;
+}
+
+.guide-interpretation-item.angle-evidence {
+  --angle-accent: #0369a1;
+  --angle-bg: #f0f9ff;
+}
+
+.guide-interpretation-item.angle-steelman {
+  --angle-accent: #b45309;
+  --angle-bg: #fffbeb;
+}
+
+.guide-interpretation-item.angle-verdict {
+  --angle-accent: #be123c;
+  --angle-bg: #fff1f2;
+}
+
+.guide-interpretation-item.angle-synthesis {
+  --angle-accent: #475569;
+  --angle-bg: #f8fafc;
+}
+
 /* ---------- On-demand flashcards & self-check ---------- */
 
 .study-extras {

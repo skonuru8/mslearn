@@ -1,9 +1,11 @@
 import threading
 import time
 
+import pytest
+
 from mslearn.graph.records import ConceptRecord
 from mslearn.opsdb import OpsDB
-from mslearn.pipeline.synthesis import cluster_new_claims
+from mslearn.pipeline.synthesis import cluster_new_claims, concept_match_claim_ids
 from mslearn.worker.context import PipelineContext
 from tests.fakes import InMemoryGraphStore
 from tests.test_extraction_graph import ScriptedRouter
@@ -132,6 +134,59 @@ def test_cluster_new_claims_parallel_same_assignments(tmp_path):
     assert graph.concept_id_of_claim("c3") != graph.concept_id_of_claim("c1")
 
 
+def _make_match_ctx(tmp_path, outputs):
+    db = OpsDB(tmp_path / "ops.db")
+    router = ScriptedRouter(outputs)
+    return PipelineContext(settings=None, db=db, router=router, graph=None), router
+
+
+def test_concept_match_maps_positional_ids(tmp_path):
+    # The concept_match model frequently returns a candidate's 1-based list
+    # position ("2") instead of its real claim_id. That position must be
+    # resolved back to the claim_id of the candidate presented at that spot
+    # in _concept_match_prompt's numbered list -- not dropped as a stray id.
+    anchor = {"claim_id": "anchor", "text": "anchor text"}
+    candidates = [
+        {"claim_id": "c-a", "text": "candidate a", "stance": "neutral"},
+        {"claim_id": "c-b", "text": "candidate b", "stance": "neutral"},
+        {"claim_id": "c-c", "text": "candidate c", "stance": "neutral"},
+    ]
+    ctx, router = _make_match_ctx(tmp_path, [{"matches": ["2"]}])
+    matches = concept_match_claim_ids(ctx, anchor, candidates)
+    assert matches == ["c-b"]
+    assert router.calls == ["synthesis"]
+
+
+def test_concept_match_drops_out_of_range(tmp_path):
+    # "99" is neither a real claim id nor a valid 1-based index into a
+    # 3-candidate list -- it must still be dropped, not resolved.
+    anchor = {"claim_id": "anchor", "text": "anchor text"}
+    candidates = [
+        {"claim_id": "c-a", "text": "candidate a", "stance": "neutral"},
+        {"claim_id": "c-b", "text": "candidate b", "stance": "neutral"},
+        {"claim_id": "c-c", "text": "candidate c", "stance": "neutral"},
+    ]
+    ctx, router = _make_match_ctx(tmp_path, [{"matches": ["99"]}])
+    matches = concept_match_claim_ids(ctx, anchor, candidates)
+    assert matches == []
+    assert router.calls == ["synthesis"]
+
+
+def test_concept_match_exact_id_still_works(tmp_path):
+    # Regression guard: a model that already returns the real claim_id
+    # (the common, correct case) must keep working unchanged.
+    anchor = {"claim_id": "anchor", "text": "anchor text"}
+    candidates = [
+        {"claim_id": "c-a", "text": "candidate a", "stance": "neutral"},
+        {"claim_id": "c-b", "text": "candidate b", "stance": "neutral"},
+        {"claim_id": "c-c", "text": "candidate c", "stance": "neutral"},
+    ]
+    ctx, router = _make_match_ctx(tmp_path, [{"matches": ["c-c"]}])
+    matches = concept_match_claim_ids(ctx, anchor, candidates)
+    assert matches == ["c-c"]
+    assert router.calls == ["synthesis"]
+
+
 class _TrackingRouter:
     """Fake router that sleeps ~40ms per call (standing in for real model
     latency) and records the maximum number of calls that were ever
@@ -176,6 +231,50 @@ class _TrackingRouter:
         finally:
             with self._lock:
                 self._in_flight -= 1
+
+
+def test_cluster_survives_bad_match_response(tmp_path):
+    # A truncated/malformed concept_match response (e.g. deepseek-v4-flash
+    # overflowing max_tokens on a large corpus) must not crash clustering --
+    # the anchor should just fall back to getting its own concept instead of
+    # taking down the whole synthesis run.
+    from mslearn.providers.base import ProviderBadOutputError
+
+    graph = InMemoryGraphStore()
+    graph.add_claim("cl1", "cache ttl", "neutral", "s1", [1.0, 0.0, 0.0])
+    graph.add_claim("cl2", "cache expiry", "neutral", "s1", [0.99, 0.01, 0.0])
+    ctx, router = make_ctx(
+        tmp_path,
+        graph,
+        [ProviderBadOutputError("truncated"), ProviderBadOutputError("truncated")],
+    )
+
+    dirty = cluster_new_claims(ctx)
+
+    assert graph.concept_id_of_claim("cl1") is not None
+    assert graph.concept_id_of_claim("cl2") is not None
+    assert dirty
+
+
+def test_cluster_propagates_transient_error(tmp_path):
+    # ProviderTransientError (retryable 429/5xx) must NOT be swallowed as a
+    # degradation case like ProviderBadOutputError -- it needs to propagate
+    # out of cluster_new_claims so synthesize_task's autoretry_for kicks in
+    # and Celery retries the whole synthesis run, instead of silently
+    # degrading to "no match" and permanently over-splitting the curriculum.
+    from mslearn.providers.base import ProviderTransientError
+
+    graph = InMemoryGraphStore()
+    graph.add_claim("cl1", "cache ttl", "neutral", "s1", [1.0, 0.0, 0.0])
+    graph.add_claim("cl2", "cache expiry", "neutral", "s1", [0.99, 0.01, 0.0])
+    ctx, router = make_ctx(
+        tmp_path,
+        graph,
+        [ProviderTransientError("rate limited"), ProviderTransientError("rate limited")],
+    )
+
+    with pytest.raises(ProviderTransientError):
+        cluster_new_claims(ctx)
 
 
 def test_cluster_new_claims_runs_calls_in_parallel(tmp_path):

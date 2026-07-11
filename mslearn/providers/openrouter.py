@@ -120,10 +120,28 @@ class OpenRouterProvider(ModelProvider):
                 parsed = json.loads(text)
             except json.JSONDecodeError as exc:
                 finish_reason = choice.get("finish_reason")
-                raise ProviderBadOutputError(
-                    f"invalid JSON from openrouter (finish_reason={finish_reason!r}):"
-                    f" {text[:200]!r}"
-                ) from exc
+                salvaged = None
+                if finish_reason != "length":
+                    # Only attempt salvage for malformed-but-complete JSON
+                    # (unescaped inner quotes, stray tokens). A finish_reason
+                    # of "length" means the model was cut off mid-generation
+                    # by the token budget — json-repair happily "completes"
+                    # a truncated tail (e.g. filling a dangling key with an
+                    # empty string), which would silently mask real data
+                    # loss as a valid-looking parse. That case must keep
+                    # raising with the actionable "raise max_tokens" hint.
+                    from json_repair import repair_json
+                    try:
+                        salvaged = repair_json(text, return_objects=True)
+                    except Exception:
+                        salvaged = None
+                if isinstance(salvaged, (dict, list)) and salvaged not in ({}, []):
+                    parsed = salvaged
+                else:
+                    raise ProviderBadOutputError(
+                        f"invalid JSON from openrouter (finish_reason={finish_reason!r}):"
+                        f" {text[:200]!r}"
+                    ) from exc
         usage = data.get("usage") or {}
         return ModelResponse(
             text=text, parsed=parsed,

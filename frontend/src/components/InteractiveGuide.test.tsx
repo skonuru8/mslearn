@@ -115,6 +115,24 @@ describe("InteractiveGuide", () => {
     expect(onToggleSection).toHaveBeenCalledWith("s1", true);
   });
 
+  it("renders the labeled interpretation block", () => {
+    const guide = baseGuide({
+      interpretation: [
+        { angle: "verdict", text: "This holds only for short horizons.", claims: ["k-abc123"] },
+      ],
+    });
+    render(<InteractiveGuide guide={guide} progress={{}} citations={[]} onToggleSection={() => {}} />);
+    expect(screen.getByText(/Model's analysis/i)).toBeInTheDocument();
+    expect(screen.getByText("This holds only for short horizons.")).toBeInTheDocument();
+    expect(screen.queryByText(/k-abc123/)).not.toBeInTheDocument(); // no raw id
+  });
+
+  it("no interpretation block when empty", () => {
+    const guide = baseGuide({ interpretation: [] });
+    render(<InteractiveGuide guide={guide} progress={{}} citations={[]} onToggleSection={() => {}} />);
+    expect(screen.queryByText(/Model's analysis/i)).not.toBeInTheDocument();
+  });
+
   it("shows an N / total reviewed progress readout driven by the progress prop", () => {
     const guide = baseGuide({
       sections: [

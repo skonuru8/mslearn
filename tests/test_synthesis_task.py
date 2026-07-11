@@ -233,6 +233,123 @@ def test_synthesize_task_skips_warm_guides_on_failure(tmp_path, monkeypatch):
     assert calls == []
 
 
+def test_process_dirty_survives_bad_conflict_and_name(tmp_path):
+    # If both the conflict-scan and concept-name model calls come back
+    # malformed/truncated (frequent with deepseek-v4-flash on large
+    # corpora), process_dirty_concepts must still complete: no conflicts get
+    # recorded, and the concept gets a deterministic fallback name derived
+    # from its claims -- never the raw concept_id.
+    from mslearn.providers.base import ProviderBadOutputError
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name=""))
+    graph.add_claim("c1", "Caching improves latency significantly here", "neutral", "s1", [1.0, 0.0])
+    graph.add_claim("c2", "Caching can add complexity", "neutral", "s1", [0.9, 0.0])
+    graph.assign_claim("c1", "k1")
+    graph.assign_claim("c2", "k1")
+    graph.mark_concept_dirty("k1", True)
+
+    router = ScriptedRouter(
+        [
+            ProviderBadOutputError("truncated conflict scan"),
+            ProviderBadOutputError("truncated name"),
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+
+    processed = process_dirty_concepts(ctx)
+
+    assert processed == 1
+    concept = graph.get_concept("k1")
+    assert concept["name"]
+    assert concept["name"] != "k1"
+    assert graph.conflicts_in_concept("k1") == []
+
+
+def test_build_curriculum_survives_bad_deps(tmp_path):
+    # A truncated concept_deps response must not crash build_curriculum --
+    # it should fall back to the natural (first_seq) spine order.
+    from mslearn.providers.base import ProviderBadOutputError
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore(concept_first_seq={"k1": 0, "k2": 1})
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name="A"))
+    graph.upsert_concept(ConceptRecord(concept_id="k2", name="B"))
+    router = ScriptedRouter([ProviderBadOutputError("truncated deps")])
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+
+    ordered = build_curriculum(ctx)
+
+    assert ordered == ["k1", "k2"]
+
+
+def test_process_dirty_propagates_transient_error(tmp_path):
+    # ProviderTransientError (retryable 429/5xx) must NOT be swallowed like
+    # ProviderBadOutputError -- it must propagate out of
+    # process_dirty_concepts so synthesize_task's autoretry_for triggers a
+    # Celery retry of the whole synthesis run instead of silently degrading
+    # to a fallback name / dropped conflicts.
+    from mslearn.providers.base import ProviderTransientError
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore()
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name=""))
+    graph.add_claim("c1", "Caching improves latency significantly here", "neutral", "s1", [1.0, 0.0])
+    graph.add_claim("c2", "Caching can add complexity", "neutral", "s1", [0.9, 0.0])
+    graph.assign_claim("c1", "k1")
+    graph.assign_claim("c2", "k1")
+    graph.mark_concept_dirty("k1", True)
+
+    router = ScriptedRouter(
+        [
+            ProviderTransientError("rate limited"),
+            ProviderTransientError("rate limited"),
+        ]
+    )
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+
+    with pytest.raises(ProviderTransientError):
+        process_dirty_concepts(ctx)
+
+
+def test_build_curriculum_propagates_transient_error(tmp_path):
+    # ProviderTransientError on the concept_deps call must propagate out of
+    # build_curriculum (for Celery autoretry), not be treated as a
+    # malformed-output degradation that silently falls back to natural
+    # spine order.
+    from mslearn.providers.base import ProviderTransientError
+
+    db = OpsDB(tmp_path / "ops.db")
+    graph = InMemoryGraphStore(concept_first_seq={"k1": 0, "k2": 1})
+    graph.upsert_concept(ConceptRecord(concept_id="k1", name="A"))
+    graph.upsert_concept(ConceptRecord(concept_id="k2", name="B"))
+    router = ScriptedRouter([ProviderTransientError("rate limited")])
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+
+    with pytest.raises(ProviderTransientError):
+        build_curriculum(ctx)
+
+
+def test_build_curriculum_skips_deps_for_large_spine(tmp_path):
+    # A spine of 61+ concepts must skip the one-shot concept_deps DAG call
+    # entirely -- it reliably overflows max_tokens on large corpora -- and
+    # fall back straight to natural spine order.
+    db = OpsDB(tmp_path / "ops.db")
+    concept_first_seq = {f"k{i:03d}": i for i in range(61)}
+    graph = InMemoryGraphStore(concept_first_seq=concept_first_seq)
+    for i in range(61):
+        cid = f"k{i:03d}"
+        graph.upsert_concept(ConceptRecord(concept_id=cid, name=f"C{i}"))
+    router = ScriptedRouter([])  # any complete() call -> IndexError -> test fails loudly
+    ctx = PipelineContext(settings=None, db=db, router=router, graph=graph)
+
+    ordered = build_curriculum(ctx)
+
+    assert router.calls == []
+    assert len(ordered) == 61
+
+
 def test_process_dirty_concepts_writes_progress_per_concept(tmp_path):
     # The "analyzing" phase runs two model calls per concept and dominated
     # the 78-minute incident run — the UI needs "n of m", not a bare spinner.
