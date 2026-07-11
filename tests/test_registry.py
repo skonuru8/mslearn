@@ -18,6 +18,13 @@ def test_detection():
         detect_source_type("mystery.xyz")
 
 
+def test_detection_txt_md_docx():
+    assert detect_source_type("notes.txt") == "text"
+    assert detect_source_type("notes.md") == "markdown"
+    assert detect_source_type("notes.markdown") == "markdown"
+    assert detect_source_type("notes.docx") == "docx"
+
+
 def test_load_source_dispatches_and_chunks(tiny_pdf, tiny_epub):
     fixture_html = str(Path("tests/fixtures/blog.html"))
     for ref in (str(tiny_pdf), str(tiny_epub), fixture_html):

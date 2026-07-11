@@ -13,6 +13,7 @@ _SUFFIX_TYPES = {
     ".mp3": "audio", ".m4a": "audio", ".wav": "audio", ".flac": "audio", ".ogg": "audio",
     ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image",
     ".gif": "image", ".bmp": "image", ".heic": "image",
+    ".txt": "text", ".md": "markdown", ".markdown": "markdown", ".docx": "docx",
 }
 
 
