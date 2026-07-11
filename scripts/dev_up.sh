@@ -15,6 +15,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Load worker knobs (MSL_PREPARE_CONCURRENCY, MSL_EXTRACT_CONCURRENCY, ...)
+# from .env so they reach the celery launches below — .env itself is
+# gitignored (see .env.example for the documented keys).
+set -a; [ -f .env ] && . ./.env; set +a
+
 echo "== starting Redis + Neo4j containers =="
 docker compose up -d
 

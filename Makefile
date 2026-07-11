@@ -1,5 +1,12 @@
 .PHONY: services services-down test check graph-test worker worker-prepare worker-extract worker-judge serve run ui-build ui-test
 
+# Load worker knobs (MSL_PREPARE_CONCURRENCY, MSL_EXTRACT_CONCURRENCY, ...)
+# from .env, if present, and export them to recipe env — .env.example
+# documents the keys; .env itself stays gitignored. The ${MSL_*:-default}
+# fallbacks in the worker-* recipes below still apply when .env is absent.
+-include .env
+export
+
 serve:
 	.venv/bin/uvicorn mslearn.server.app:create_app --factory --port 8000
 
